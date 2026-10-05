@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
 import { MuminService } from './mumin.service';
 import { validateBatch, validateId, validateInsert, validatePatch } from './mumin.validation';
 
@@ -11,6 +11,12 @@ export class MuminController {
   @Post('batch/get')
   getMany(@Body() body: any) {
     return this.service.getMany(validateBatch(body, 'ids', validateId));
+  }
+
+  /** { "ids": [20178652, ...] } */
+  @Post('batch/delete')
+  deleteMany(@Body() body: any) {
+    return this.service.deleteMany(validateBatch(body, 'ids', validateId));
   }
 
   /** { "items": [{ "Mumin_ID": 1, "Person_ID": 1, ...columns }] } */
@@ -35,6 +41,11 @@ export class MuminController {
   @Post()
   create(@Body() body: any) {
     return this.service.create(validateInsert(body));
+  }
+
+  @Delete(':id')
+  deleteOne(@Param('id', ParseIntPipe) id: number) {
+    return this.service.deleteOne(id);
   }
 
   /** Partial update: only the columns present in the body are changed. */

@@ -30,6 +30,7 @@ export class MuminService {
     const started = process.hrtime.bigint();
     const cached = await this.cache.get(id);
     if (cached) return { source: 'redis', ms: elapsed(started), data: cached };
+    if ((await this.writer.dirtyOf([id])).size) throw new NotFoundException(`Mumin_ID ${id} not found`); // pending delete
     const row = await this.repo.findById(id);
     if (!row) throw new NotFoundException(`Mumin_ID ${id} not found`);
     await this.cache.set(row);
@@ -42,7 +43,8 @@ export class MuminService {
     const { hits, misses } = await this.cache.getMany(unique);
     let fromDb: MuminRecord[] = [];
     if (misses.length) {
-      fromDb = await this.repo.findByIds(misses);
+      const pending = await this.writer.dirtyOf(misses); // pending deletes stay deleted
+      fromDb = (await this.repo.findByIds(misses)).filter((r) => !pending.has(r.Mumin_ID));
       if (fromDb.length) await this.cache.setMany(fromDb);
       fromDb.forEach((r) => hits.set(r.Mumin_ID, r));
     }
@@ -101,6 +103,35 @@ export class MuminService {
     }
     const r = await this.updateRedisFirst(items);
     return { mode: 'redis-first', requested: items.length, updated: r.rows.filter(Boolean).length, notFound: r.notFound, ms: elapsed(started) };
+  }
+
+  async deleteOne(id: number) {
+    const r = await this.deleteMany([id]);
+    if (r.deleted === 0) throw new NotFoundException(`Mumin_ID ${id} not found`);
+    return r;
+  }
+
+  async deleteMany(ids: number[]) {
+    const started = process.hrtime.bigint();
+    const unique = [...new Set(ids)];
+    if (!this.redisFirst) {
+      const n = await this.repo.deleteByIds(unique);
+      await this.cache.delMany(unique);
+      return { mode: 'db-first', requested: unique.length, deleted: n, ms: elapsed(started) };
+    }
+    let res = await this.writer.delete(unique);
+    const missing = unique.filter((_, i) => !res[i]);
+    if (missing.length) {
+      // Not in Redis (cold cache): pull from MSSQL so the delete goes through the same queue.
+      const fromDb = await this.repo.findByIds(missing);
+      if (fromDb.length) {
+        await this.cache.setMany(fromDb);
+        const retried = await this.writer.delete(fromDb.map((r) => r.Mumin_ID));
+        res = res.concat(retried.filter(Boolean));
+      }
+    }
+    const deleted = res.filter(Boolean).length;
+    return { mode: 'redis-first', requested: unique.length, deleted, notFound: unique.length - deleted, ms: elapsed(started) };
   }
 
   /** Redis Lua update; ids missing from Redis are pulled from MSSQL once and retried. */

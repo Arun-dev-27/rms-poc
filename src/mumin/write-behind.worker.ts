@@ -97,16 +97,19 @@ export class WriteBehindWorker implements OnApplicationBootstrap, OnModuleDestro
   }
 
   private async apply(entries: [string, string[]][]) {
-    const latest = new Map<number, { sid: string; row: MuminRecord }>();
+    // Coalesce: only the latest write per Mumin_ID matters (upsert row, or delete).
+    const latest = new Map<number, { sid: string; row?: MuminRecord }>();
     for (const [sid, fields] of entries) {
       const f: Record<string, string> = {};
       for (let i = 0; i < fields.length; i += 2) f[fields[i]] = fields[i + 1];
-      latest.set(Number(f.id), { sid, row: JSON.parse(f.row) });
+      latest.set(Number(f.id), { sid, row: f.op === 'delete' ? undefined : JSON.parse(f.row) });
     }
-    const rows = [...latest.values()].map((v) => v.row);
+    const deletes = [...latest.entries()].filter(([, v]) => !v.row).map(([id]) => id);
+    if (deletes.length) await this.repo.deleteByIds(deletes); // transient errors throw -> retried
+    const rows = [...latest.values()].filter((v) => v.row).map((v) => v.row!);
     const rejected: number[] = [];
     try {
-      await this.repo.upsertMany(rows);
+      if (rows.length) await this.repo.upsertMany(rows);
     } catch (e) {
       // MSSQL unreachable / timeout: throw => nothing is ACKed, the whole batch is retried later.
       if (!isRejectedBySqlServer(e)) throw e;

@@ -10,9 +10,9 @@ import { pipeline } from 'stream/promises';
 import { createGunzip, createGzip } from 'zlib';
 import { MssqlService } from '../database/mssql.service';
 import { TABLE } from '../mumin/mumin.columns';
-import { MuminCache } from '../mumin/mumin.cache';
+import { META_KEY, MuminCache } from '../mumin/mumin.cache';
 import * as sql from 'mssql';
-import { MuminRedisWriter } from '../mumin/mumin.redis-writer';
+import { DIRTY_KEY, DLQ_KEY, MuminRedisWriter, STREAM_KEY } from '../mumin/mumin.redis-writer';
 import { MuminRepository } from '../mumin/mumin.repository';
 import { ALL_COLUMNS, KEY_COLUMN, MuminRecord } from '../mumin/mumin.types';
 import { RedisService } from '../redis/redis.service';
@@ -240,6 +240,26 @@ export class SnapshotService implements OnApplicationBootstrap {
     return { fromVersion: from, toVersion: current, upserts, deletes, ms: Date.now() - started };
   }
 
+  /** Deletes every cached record (simulates "Redis data lost"). Pending write queue is kept. */
+  async clearRedis() {
+    return this.withLock(async () => {
+      const started = Date.now();
+      const deletedKeys = await this.cache.clearAll();
+      return { deletedKeys, ms: Date.now() - started };
+    });
+  }
+
+  /** Up to n record ids currently in Redis (SCAN, non-blocking). */
+  async sampleIds(n: number): Promise<number[]> {
+    const ids: number[] = [];
+    const stream = this.redis.client.scanStream({ match: 'mumin:rec:*', count: 1000 });
+    for await (const keys of stream as AsyncIterable<string[]>) {
+      for (const k of keys) ids.push(Number(k.slice('mumin:rec:'.length)));
+      if (ids.length >= n) { stream.destroy(); break; }
+    }
+    return ids.slice(0, n);
+  }
+
   async listSnapshots(): Promise<SnapshotInfo[]> {
     const files = (await fs.readdir(this.dir).catch(() => [] as string[]))
       .filter((f) => f.startsWith('mumin-') && f.endsWith('.ndjson.gz'))
@@ -254,8 +274,12 @@ export class SnapshotService implements OnApplicationBootstrap {
   async status() {
     const persistence = await this.redis.client.info('persistence');
     const pick = (k: string) => persistence.match(new RegExp(`${k}:(.*)`))?.[1]?.trim();
+    const keys = await this.cache.countKeys();
+    // dbsize minus the bookkeeping keys = exact record count, without scanning 264k keys
+    const bookkeeping = await this.redis.client.exists(META_KEY, STREAM_KEY, DLQ_KEY, DIRTY_KEY, LOCK_KEY);
     return {
-      redisKeys: await this.cache.countKeys(),
+      redisKeys: keys,
+      redisRecords: keys - bookkeeping,
       redisMemory: await this.usedMemory(),
       mssqlRows: await this.repo.count(),
       changeTracking: await this.repo.ctVersions(),

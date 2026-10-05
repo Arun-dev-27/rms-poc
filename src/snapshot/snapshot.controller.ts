@@ -1,9 +1,34 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { COLUMNS } from '../mumin/mumin.columns';
+import { MuminRedisWriter } from '../mumin/mumin.redis-writer';
 import { SnapshotService } from './snapshot.service';
 
 @Controller('cache')
 export class SnapshotController {
-  constructor(private readonly snapshots: SnapshotService) {}
+  constructor(private readonly snapshots: SnapshotService, private readonly writer: MuminRedisWriter) {}
+
+  /** Column metadata (used by the UI to build forms). */
+  @Get('columns')
+  columns() {
+    return COLUMNS;
+  }
+
+  /** Write-behind queue only (cheap; the UI polls it to time "saved in MSSQL"). */
+  @Get('queue')
+  queue() {
+    return this.writer.stats();
+  }
+
+  @Get('sample-ids')
+  sampleIds(@Query('n') n?: string) {
+    return this.snapshots.sampleIds(Math.min(Math.max(Number(n) || 100, 1), 10000));
+  }
+
+  /** Delete ALL cached records from Redis. */
+  @Post('clear')
+  clear() {
+    return this.snapshots.clearRedis();
+  }
 
   @Get('status')
   status() {

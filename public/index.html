@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mumin Redis Console</title>
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --panel-2: #f0f2f5; --text: #1b1f24; --muted: #5d6673;
+  --border: #dde1e6; --accent: #2457d6; --accent-weak: #e6edfc; --ok: #1a7f4b; --ok-weak: #e3f4ea;
+  --warn: #9a6200; --warn-weak: #fdf1dc; --bad: #c0362c; --bad-weak: #fbe6e4; --changed: #fff4cc;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #191d23; --panel-2: #20252c; --text: #e6e9ed; --muted: #98a2ae;
+    --border: #2c333c; --accent: #7aa2ff; --accent-weak: #1d2a47; --ok: #4cc38a; --ok-weak: #15301f;
+    --warn: #e0a640; --warn-weak: #33270f; --bad: #f07167; --bad-weak: #3a1a17; --changed: #3a3315;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #191d23; --panel-2: #20252c; --text: #e6e9ed; --muted: #98a2ae;
+  --border: #2c333c; --accent: #7aa2ff; --accent-weak: #1d2a47; --ok: #4cc38a; --ok-weak: #15301f;
+  --warn: #e0a640; --warn-weak: #33270f; --bad: #f07167; --bad-weak: #3a1a17; --changed: #3a3315;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+header .sub { color: var(--muted); font-size: 13px; }
+header .right { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--muted); margin-right: 6px; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 60px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.stat .value { font-size: 22px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat .hint { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.good { color: var(--ok); } .badc { color: var(--bad); } .warnc { color: var(--warn); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; overflow-x: auto; }
+.tab { background: none; border: none; padding: 10px 16px; font: inherit; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.view { display: none; } .view.active { display: block; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.card h3 { margin: 0 0 4px; font-size: 15px; }
+.card p.desc { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.card .result { margin-top: 10px; font-size: 13px; min-height: 20px; }
+.section-title { font-size: 13px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 24px 0 10px; }
+button.btn { font: inherit; font-weight: 600; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+button.btn.secondary { background: var(--panel); color: var(--accent); }
+button.btn.danger { background: var(--bad); border-color: var(--bad); }
+button.btn.danger.secondary { background: var(--panel); color: var(--bad); }
+button.btn:disabled { opacity: .5; cursor: not-allowed; }
+button.btn.small { padding: 4px 10px; font-size: 13px; }
+input, select, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-weak); border-color: var(--accent); }
+textarea { width: 100%; font-family: var(--mono); font-size: 12.5px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+.badge.redis { background: var(--bad-weak); color: var(--bad); } .badge.mssql { background: var(--accent-weak); color: var(--accent); }
+.badge.ok { background: var(--ok-weak); color: var(--ok); } .badge.warn { background: var(--warn-weak); color: var(--warn); }
+.timing { font-family: var(--mono); font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); position: sticky; top: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table-wrap { max-height: 380px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px 14px; margin-top: 14px; }
+.field label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.field label .t { font-family: var(--mono); font-size: 11px; }
+.field input, .field select { width: 100%; }
+.field.changed input, .field.changed select { background: var(--changed); border-color: var(--warn); }
+.empty { color: var(--muted); padding: 30px; text-align: center; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
+.kv div:nth-child(odd) { color: var(--muted); }
+.toast { position: fixed; right: 20px; bottom: 20px; background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 420px; }
+.toast.show { opacity: 1; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .7s linear infinite; vertical-align: -1px; margin-right: 6px; }
+@keyframes s { to { transform: rotate(360deg); } }
+@media (max-width: 640px) { main { padding: 14px 16px 40px; } header { padding: 12px 16px; } .stat .value { font-size: 19px; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Mumin_Mast · Redis Console</h1>
+    <div class="sub">MMS.dbo.Mumin_Mast · Redis-first writes · MSSQL in background</div>
+  </div>
+  <div class="right">
+    <span><span id="conn" class="dot"></span><span id="connText">connecting…</span></span>
+    <label><input type="checkbox" id="auto" checked> auto-refresh</label>
+    <button class="btn small secondary" id="themeBtn" title="Toggle theme">Theme</button>
+  </div>
+</header>
+
+<main>
+  <section class="stats" id="stats">
+    <div class="stat"><div class="label">Redis records</div><div class="value" id="sRedis">—</div><div class="hint" id="sMem">memory —</div></div>
+    <div class="stat"><div class="label">MSSQL rows</div><div class="value" id="sSql">—</div><div class="hint" id="sCt">change tracking —</div></div>
+    <div class="stat"><div class="label">Redis vs MSSQL</div><div class="value" id="sSync">—</div><div class="hint" id="sSyncHint">&nbsp;</div></div>
+    <div class="stat"><div class="label">Waiting for MSSQL</div><div class="value" id="sQueue">—</div><div class="hint" id="sQueueHint">queue / dirty / errors</div></div>
+    <div class="stat"><div class="label">Last full load</div><div class="value" id="sLoad">—</div><div class="hint" id="sLoadHint">&nbsp;</div></div>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="cache">Cache &amp; Snapshots</button>
+    <button class="tab" data-view="single">Single record</button>
+    <button class="tab" data-view="batch">Batch</button>
+    <button class="tab" data-view="log">Timing log</button>
+  </nav>
+
+  <!-- ============ CACHE & SNAPSHOTS ============ -->
+  <section class="view active" id="view-cache">
+    <div class="grid">
+      <div class="card">
+        <h3>Load all data: MSSQL → Redis</h3>
+        <p class="desc">Wipes Redis records, then streams all rows from MSSQL into Redis (MSET, 5,000 per batch). Usually 35–53 s.</p>
+        <button class="btn" data-action="load">Load into Redis</button>
+        <div class="result" id="r-load"></div>
+      </div>
+      <div class="card">
+        <h3>Delete all Redis data</h3>
+        <p class="desc">Removes every record from Redis, which simulates Redis data being lost. MSSQL is not touched.</p>
+        <button class="btn danger" data-action="clear">Delete Redis data</button>
+        <div class="result" id="r-clear"></div>
+      </div>
+      <div class="card">
+        <h3>Take snapshot</h3>
+        <p class="desc">Saves all Redis records to a gzip file, plus the MSSQL change version. Also runs automatically every 15 min.</p>
+        <button class="btn" data-action="snapshot">Take snapshot</button>
+        <div class="result" id="r-snapshot"></div>
+      </div>
+      <div class="card">
+        <h3>Restore: Snapshot → Redis</h3>
+        <p class="desc">Loads the latest snapshot into Redis, then applies every MSSQL change made after it. Usually 11–19 s.</p>
+        <button class="btn" data-action="restore">Restore latest snapshot</button>
+        <div class="result" id="r-restore"></div>
+      </div>
+      <div class="card">
+        <h3>Reconcile with MSSQL</h3>
+        <p class="desc">Copies changes made directly in MSSQL (outside this API) into Redis. Runs every minute automatically.</p>
+        <button class="btn secondary" data-action="reconcile">Reconcile now</button>
+        <div class="result" id="r-reconcile"></div>
+      </div>
+      <div class="card">
+        <h3>Re-import from stage</h3>
+        <p class="desc">Replaces the docker MSSQL table with a fresh copy from stage (read-only), then reloads Redis. About 3 minutes.</p>
+        <button class="btn danger secondary" data-action="import">Re-import from stage</button>
+        <div class="result" id="r-import"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Snapshots</div>
+    <div class="card">
+      <div class="table-wrap"><table>
+        <thead><tr><th>File</th><th>Taken</th><th class="num">Size</th><th></th></tr></thead>
+        <tbody id="snapRows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div class="section-title">Redis persistence</div>
+    <div class="card"><div class="kv" id="persist"></div></div>
+  </section>
+
+  <!-- ============ SINGLE RECORD ============ -->
+  <section class="view" id="view-single">
+    <div class="card">
+      <div class="row">
+        <input id="findId" type="number" placeholder="Mumin_ID (ITS)" style="width:200px">
+        <button class="btn" id="findBtn">Find</button>
+        <button class="btn secondary" id="randomBtn">Random record</button>
+        <span id="findResult"></span>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px" id="recordCard">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <strong id="recTitle">No record loaded</strong>
+          <span id="recMode" class="badge">—</span>
+        </div>
+        <div class="row">
+          <button class="btn secondary" id="newFromBtn" disabled>Insert new (copy of this)</button>
+          <button class="btn danger secondary" id="deleteBtn" disabled>Delete record</button>
+          <button class="btn" id="saveBtn" disabled>Save changes</button>
+        </div>
+      </div>
+      <div class="result" id="saveResult"></div>
+      <div class="fields" id="fields"><div class="empty">Find a record to view and edit it.</div></div>
+    </div>
+  </section>
+
+  <!-- ============ BATCH ============ -->
+  <section class="view" id="view-batch">
+    <div class="card">
+      <h3>Mumin_IDs</h3>
+      <p class="desc">Paste IDs (comma, space or new line) or pick random ones from Redis. Batches over 10,000 are sent in chunks.</p>
+      <textarea id="ids" rows="4" placeholder="20178652, 20240152, ..."></textarea>
+      <div class="row" style="margin-top:8px">
+        <input id="pickN" type="number" value="1000" min="1" max="10000" style="width:110px">
+        <button class="btn secondary" id="pickBtn">Pick random IDs</button>
+        <span id="idCount" class="badge">0 ids</span>
+        <button class="btn small secondary" id="clearIds">Clear</button>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:14px">
+      <div class="card">
+        <h3>Batch read</h3>
+        <p class="desc">One MGET per 5,000 keys; any misses are fetched from MSSQL with one query.</p>
+        <button class="btn" id="bReadBtn">Read all</button>
+        <div class="result" id="bReadRes"></div>
+      </div>
+      <div class="card">
+        <h3>Batch update</h3>
+        <p class="desc">Set one column to a value for every ID. Saved in Redis first; MSSQL follows.</p>
+        <div class="row">
+          <select id="bCol" style="flex:1"></select>
+          <input id="bVal" placeholder="new value (empty = NULL)" style="flex:1">
+        </div>
+        <div style="margin-top:10px"><button class="btn" id="bUpdBtn">Update all</button></div>
+        <div class="result" id="bUpdRes"></div>
+      </div>
+      <div class="card">
+        <h3>Batch insert test rows</h3>
+        <p class="desc">Creates N new rows (copy of a real record, new IDs). The new IDs are put in the box above so you can delete them after.</p>
+        <div class="row">
+          <label>N <input id="bInsN" type="number" value="1000" min="1" max="50000" style="width:100px"></label>
+          <label>start ID <input id="bInsStart" type="number" value="99000001" style="width:130px"></label>
+        </div>
+        <div style="margin-top:10px"><button class="btn" id="bInsBtn">Insert</button></div>
+        <div class="result" id="bInsRes"></div>
+      </div>
+      <div class="card">
+        <h3>Batch delete</h3>
+        <p class="desc">Deletes every ID in the box from Redis now, and from MSSQL in the background.</p>
+        <button class="btn danger" id="bDelBtn">Delete all</button>
+        <div class="result" id="bDelRes"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Result preview</div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>Mumin_ID</th><th>Full_Name</th><th>Jamaat</th><th>Mobile_No</th><th>Post</th><th>Gender</th><th class="num">Age</th></tr></thead>
+      <tbody id="previewRows"><tr><td colspan="7" class="empty">Run a batch read to preview rows.</td></tr></tbody>
+    </table></div></div>
+  </section>
+
+  <!-- ============ TIMING LOG ============ -->
+  <section class="view" id="view-log">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <p class="desc" style="margin:0">Every action from this page. <b>Server</b> = time measured inside the API. <b>Total</b> = including the network. <b>In MSSQL after</b> = when the background writer finished.</p>
+        <button class="btn small secondary" id="clearLog">Clear</button>
+      </div>
+      <div class="table-wrap" style="max-height:560px"><table>
+        <thead><tr><th>Time</th><th>Action</th><th class="num">Records</th><th class="num">Server</th><th class="num">Total</th><th class="num">In MSSQL after</th><th>Result</th></tr></thead>
+        <tbody id="logRows"><tr><td colspan="7" class="empty">No actions yet.</td></tr></tbody>
+      </table></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const fmtN = (n) => (n == null ? '—' : Number(n).toLocaleString());
+const fmtMs = (ms) => (ms == null ? '—' : ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : (+ms).toFixed(ms < 10 ? 2 : 0) + ' ms');
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let COLUMNS = [];
+let current = null;        // loaded record
+let insertMode = false;
+let busy = false;
+
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 3500); }
+
+async function api(method, path, body) {
+  const t0 = performance.now();
+  const res = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const total = performance.now() - t0;
+  let data = null;
+  try { data = await res.json(); } catch { /* empty */ }
+  if (!res.ok) { const err = new Error(Array.isArray(data?.message) ? data.message.join(', ') : data?.message || res.statusText); err.status = res.status; throw err; }
+  return { data, total };
+}
+
+/* Poll the write-behind queue until everything reached MSSQL; returns ms waited. */
+async function waitForMssql(timeoutMs = 300000) {
+  const t0 = performance.now();
+  while (performance.now() - t0 < timeoutMs) {
+    try { const { data } = await api('GET', '/cache/queue'); if (data.dirty === 0) return performance.now() - t0; } catch { /* retry */ }
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  return null;
+}
+
+/* ---------- timing log ---------- */
+const logEntries = [];
+function log(e) {
+  logEntries.unshift({ at: new Date(), ...e });
+  renderLog();
+}
+function renderLog() {
+  const tb = $('#logRows');
+  if (!logEntries.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">No actions yet.</td></tr>'; return; }
+  tb.innerHTML = logEntries.map((e) => `<tr>
+    <td>${e.at.toLocaleTimeString()}</td><td><b>${esc(e.action)}</b></td><td class="num">${fmtN(e.records)}</td>
+    <td class="num timing">${fmtMs(e.server)}</td><td class="num timing">${fmtMs(e.total)}</td>
+    <td class="num timing">${e.mssql === undefined ? '' : e.mssql === 'pending' ? '<span class="spin"></span>' : fmtMs(e.mssql)}</td>
+    <td class="${e.error ? 'badc' : ''}">${esc(e.result || '')}</td></tr>`).join('');
+}
+$('#clearLog').onclick = () => { logEntries.length = 0; renderLog(); };
+
+/* Track MSSQL persistence for a write and update its log entry + result element. */
+async function trackMssql(entry, el) {
+  entry.mssql = 'pending'; renderLog();
+  if (el) el.insertAdjacentHTML('beforeend', ' <span class="mssqlw"><span class="spin"></span>saving to MSSQL…</span>');
+  const ms = await waitForMssql();
+  entry.mssql = ms; renderLog();
+  if (el) { const w = el.querySelector('.mssqlw'); if (w) w.innerHTML = ms == null ? '<span class="warnc">still pending</span>' : `· in MSSQL after <span class="timing">${fmtMs(ms)}</span>`; }
+}
+
+/* ---------- status ---------- */
+async function refreshStatus() {
+  try {
+    const { data: s } = await api('GET', '/cache/status');
+    $('#conn').className = 'dot ok'; $('#connText').textContent = 'connected';
+    const recs = s.redisRecords;
+    $('#sRedis').textContent = fmtN(recs);
+    $('#sMem').textContent = 'memory ' + s.redisMemory;
+    $('#sSql').textContent = fmtN(s.mssqlRows);
+    $('#sCt').textContent = 'change tracking v' + s.changeTracking.current;
+    const diff = recs - s.mssqlRows;
+    const pending = s.writeBehind.dirty;
+    if (diff === 0) { $('#sSync').innerHTML = '<span class="good">In sync</span>'; $('#sSyncHint').textContent = 'same row count'; }
+    else { $('#sSync').innerHTML = `<span class="${pending ? 'warnc' : 'badc'}">${diff > 0 ? '+' : ''}${fmtN(diff)}</span>`; $('#sSyncHint').textContent = pending ? 'writes still on the way' : recs === 0 ? 'Redis is empty' : 'counts differ'; }
+    $('#sQueue').innerHTML = `${fmtN(s.writeBehind.streamLength)} <span style="font-size:14px;color:var(--muted)">/ ${fmtN(pending)} / <span class="${s.writeBehind.dlq ? 'badc' : ''}">${fmtN(s.writeBehind.dlq)}</span></span>`;
+    const m = s.meta || {};
+    $('#sLoad').textContent = m.loadMs ? fmtMs(+m.loadMs) : '—';
+    $('#sLoadHint').textContent = m.source ? `from ${m.source === 'db' ? 'MSSQL' : m.source}${m.loadedAt ? ' · ' + new Date(m.loadedAt).toLocaleTimeString() : ''}` : 'no load info';
+    const p = s.redisPersistence;
+    $('#persist').innerHTML = `
+      <div>AOF (write log)</div><div>${p.aof_enabled === '1' ? '<span class="badge ok">on</span> fsync every second' : '<span class="badge warn">off</span>'}</div>
+      <div>Last RDB save</div><div>${new Date(p.rdb_last_save_time).toLocaleString()} · <span class="badge ${p.rdb_last_bgsave_status === 'ok' ? 'ok' : 'warn'}">${p.rdb_last_bgsave_status}</span></div>
+      <div>Changes since last RDB save</div><div>${fmtN(p.rdb_changes_since_last_save)}</div>
+      <div>MSSQL change tracking</div><div>current v${s.changeTracking.current} · min valid v${s.changeTracking.minValid} · Redis at v${m.ctVersion ?? '—'}</div>`;
+    renderSnapshots(s.snapshots);
+  } catch (e) {
+    $('#conn').className = 'dot bad'; $('#connText').textContent = 'API not reachable';
+  }
+}
+
+function renderSnapshots(list) {
+  const tb = $('#snapRows');
+  if (!list?.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">No snapshots yet. Take one above.</td></tr>'; return; }
+  tb.innerHTML = list.map((s, i) => `<tr>
+    <td style="font-family:var(--mono);font-size:12px">${esc(s.file)} ${i === 0 ? '<span class="badge ok">latest</span>' : ''}</td>
+    <td>${new Date(s.modifiedAt).toLocaleString()}</td><td class="num">${(s.bytes / 1048576).toFixed(1)} MB</td>
+    <td><button class="btn small secondary" data-restore="${esc(s.file)}">Restore</button></td></tr>`).join('');
+}
+$('#snapRows').addEventListener('click', (e) => { const f = e.target.dataset?.restore; if (f) runAction('restore', { file: f }); });
+
+let timer = setInterval(() => { if ($('#auto').checked && !document.hidden) refreshStatus(); }, 3000);
+
+/* ---------- cache actions ---------- */
+const ACTIONS = {
+  load:      { label: 'Load MSSQL → Redis', method: 'POST', path: '/cache/load', body: { fresh: true },
+               summary: (d) => `${fmtN(d.rows)} rows · ${fmtN(d.rowsPerSec)} rows/s · ${d.redisMemory}`, server: (d) => d.ms, records: (d) => d.rows },
+  clear:     { label: 'Delete Redis data', method: 'POST', path: '/cache/clear', confirm: 'Delete ALL records from Redis? (MSSQL is not touched)',
+               summary: (d) => `${fmtN(d.deletedKeys)} keys deleted`, server: (d) => d.ms, records: (d) => d.deletedKeys },
+  snapshot:  { label: 'Take snapshot', method: 'POST', path: '/cache/snapshot',
+               summary: (d) => `${fmtN(d.rows)} rows · ${(d.bytes / 1048576).toFixed(1)} MB`, server: (d) => d.ms, records: (d) => d.rows },
+  restore:   { label: 'Snapshot → Redis', method: 'POST', path: '/cache/restore', confirm: 'Replace Redis data with the snapshot?',
+               summary: (d) => d.source === 'snapshot'
+                 ? `${fmtN(d.rows)} rows in ${fmtMs(d.snapshotMs)} + MSSQL changes after snapshot: ${d.delta.upserts} upserts / ${d.delta.deletes} deletes`
+                 : `snapshot too old → full MSSQL load: ${fmtN(d.rows)} rows`,
+               server: (d) => d.totalMs ?? d.ms, records: (d) => d.rows },
+  reconcile: { label: 'Reconcile', method: 'POST', path: '/cache/reconcile',
+               summary: (d) => d.skipped ? 'skipped (another job running or Redis empty)' : `v${d.fromVersion} → v${d.toVersion}: ${d.upserts} upserts, ${d.deletes} deletes`,
+               server: (d) => d.ms, records: (d) => (d.upserts || 0) + (d.deletes || 0) },
+  import:    { label: 'Re-import from stage', method: 'POST', path: '/cache/import-source', confirm: 'Replace the docker MSSQL table with a fresh copy from stage? Takes ~3 minutes.',
+               summary: (d) => `${fmtN(d.importedRows)} rows imported in ${fmtMs(d.importMs)} · Redis loaded in ${fmtMs(d.redis.ms)}`,
+               server: (d) => d.importMs + d.redis.ms, records: (d) => d.importedRows },
+};
+
+async function runAction(key, bodyOverride) {
+  const a = ACTIONS[key];
+  if (busy) return toast('Another operation is running…');
+  if (a.confirm && !confirm(a.confirm)) return;
+  const btn = document.querySelector(`[data-action="${key}"]`);
+  const out = $('#r-' + key);
+  busy = true;
+  document.querySelectorAll('[data-action]').forEach((b) => (b.disabled = true));
+  const orig = btn.textContent;
+  const t0 = performance.now();
+  const tick = setInterval(() => { btn.innerHTML = `<span class="spin"></span>${((performance.now() - t0) / 1000).toFixed(1)} s`; }, 100);
+  try {
+    const { data, total } = await api(a.method, a.path, bodyOverride ?? a.body);
+    out.innerHTML = `<span class="badge ok">done</span> <span class="timing">${fmtMs(a.server(data))}</span> · ${esc(a.summary(data))}`;
+    log({ action: a.label, records: a.records(data), server: a.server(data), total, result: a.summary(data) });
+  } catch (e) {
+    out.innerHTML = `<span class="badc">${esc(e.message)}</span>`;
+    log({ action: a.label, total: performance.now() - t0, result: e.message, error: true });
+  } finally {
+    clearInterval(tick); btn.textContent = orig; busy = false;
+    document.querySelectorAll('[data-action]').forEach((b) => (b.disabled = false));
+    refreshStatus();
+  }
+}
+document.querySelectorAll('[data-action]').forEach((b) => (b.onclick = () => runAction(b.dataset.action)));
+
+/* ---------- single record ---------- */
+function parseValue(col, raw) {
+  if (raw === '' || raw === 'null') return null;
+  if (col.type === 'bit') return raw === 'true';
+  if (col.type === 'int' || col.type === 'numeric') return Number(raw);
+  return raw;
+}
+function inputFor(col, value) {
+  const v = value ?? '';
+  if (col.type === 'bit') {
+    return `<select data-col="${col.name}"><option value="" ${value == null ? 'selected' : ''}>NULL</option>
+      <option value="true" ${value === true ? 'selected' : ''}>true</option><option value="false" ${value === false ? 'selected' : ''}>false</option></select>`;
+  }
+  const type = col.type === 'int' || col.type === 'numeric' ? 'number' : 'text';
+  const max = col.length > 0 ? `maxlength="${col.length}"` : '';
+  return `<input data-col="${col.name}" type="${type}" ${max} value="${esc(v)}" placeholder="${col.nullable ? 'NULL' : 'required'}">`;
+}
+function renderRecord(rec, source, ms) {
+  current = rec; insertMode = false;
+  $('#recTitle').textContent = `Mumin_ID ${rec.Mumin_ID} · ${rec.Full_Name ?? ''}`;
+  $('#recMode').className = 'badge ' + (source === 'redis' ? 'redis' : 'mssql');
+  $('#recMode').textContent = `read from ${source === 'redis' ? 'Redis' : 'MSSQL'} in ${fmtMs(ms)}`;
+  $('#fields').innerHTML = COLUMNS.map((c) => `<div class="field" data-field="${c.name}">
+      <label><span>${c.name}${c.nullable ? '' : ' *'}</span><span class="t">${c.sql.toLowerCase()}</span></label>
+      ${c.name === 'Mumin_ID' ? `<input data-col="Mumin_ID" type="number" value="${rec.Mumin_ID}" disabled>` : inputFor(c, rec[c.name])}</div>`).join('');
+  $('#saveBtn').disabled = true; $('#saveBtn').textContent = 'Save changes';
+  $('#deleteBtn').disabled = false; $('#newFromBtn').disabled = false;
+  $('#saveResult').innerHTML = '';
+}
+function changedFields() {
+  const patch = {};
+  for (const c of COLUMNS) {
+    if (c.name === 'Mumin_ID' && !insertMode) continue;
+    const el = document.querySelector(`[data-col="${c.name}"]`);
+    if (!el) continue;
+    const v = parseValue(c, el.value);
+    if (insertMode || JSON.stringify(v) !== JSON.stringify(current[c.name] ?? null)) patch[c.name] = v;
+  }
+  return patch;
+}
+$('#fields').addEventListener('input', () => {
+  if (!current) return;
+  const patch = changedFields();
+  document.querySelectorAll('.field').forEach((f) => f.classList.toggle('changed', !insertMode && f.dataset.field in patch));
+  const n = Object.keys(patch).length;
+  $('#saveBtn').disabled = !insertMode && n === 0;
+  if (!insertMode) $('#saveBtn').textContent = n ? `Save ${n} change${n > 1 ? 's' : ''}` : 'Save changes';
+});
+
+async function find(id) {
+  if (!id) return;
+  $('#findResult').innerHTML = '<span class="spin"></span>';
+  try {
+    const { data, total } = await api('GET', '/mumin/' + id);
+    renderRecord(data.data, data.source, data.ms);
+    $('#findResult').innerHTML = '';
+    log({ action: 'Single read', records: 1, server: data.ms, total, result: `Mumin_ID ${id} from ${data.source}` });
+  } catch (e) {
+    $('#findResult').innerHTML = `<span class="badc">${esc(e.message)}</span>`;
+  }
+}
+$('#findBtn').onclick = () => find($('#findId').value.trim());
+$('#findId').addEventListener('keydown', (e) => { if (e.key === 'Enter') find(e.target.value.trim()); });
+$('#randomBtn').onclick = async () => {
+  const { data } = await api('GET', '/cache/sample-ids?n=500');
+  if (!data.length) return toast('Redis is empty. Load or restore first.');
+  const id = data[Math.floor(Math.random() * data.length)];
+  $('#findId').value = id; find(id);
+};
+$('#saveBtn').onclick = async () => {
+  const patch = changedFields();
+  const out = $('#saveResult');
+  out.innerHTML = '<span class="spin"></span>saving…';
+  try {
+    let res;
+    if (insertMode) {
+      res = await api('POST', '/mumin', patch);
+      const entry = { action: 'Single insert', records: 1, server: res.data.ms, total: res.total, result: `Mumin_ID ${patch.Mumin_ID} inserted` };
+      out.innerHTML = `<span class="badge ok">inserted in Redis</span> <span class="timing">${fmtMs(res.data.ms)}</span>`;
+      log(entry); trackMssql(entry, out);
+      const { data } = await api('GET', '/mumin/' + patch.Mumin_ID);
+      const keep = out.innerHTML; renderRecord(data.data, data.source, data.ms); out.innerHTML = keep;
+    } else {
+      res = await api('PATCH', '/mumin/' + current.Mumin_ID, patch);
+      const n = Object.keys(patch).length;
+      const entry = { action: 'Single update', records: 1, server: res.data.ms, total: res.total, result: `${n} column(s): ${Object.keys(patch).join(', ')}` };
+      log(entry);
+      renderRecord(res.data.data, 'redis', res.data.ms);
+      $('#recMode').textContent = 'saved in Redis';
+      out.innerHTML = `<span class="badge ok">saved in Redis</span> <span class="timing">${fmtMs(res.data.ms)}</span> · ${n} column(s)`;
+      trackMssql(entry, out);
+    }
+    refreshStatus();
+  } catch (e) { out.innerHTML = `<span class="badc">${esc(e.message)}</span>`; }
+};
+$('#deleteBtn').onclick = async () => {
+  if (!current || !confirm(`Delete Mumin_ID ${current.Mumin_ID}? It is removed from Redis now and from MSSQL in the background.`)) return;
+  const out = $('#saveResult');
+  try {
+    const res = await api('DELETE', '/mumin/' + current.Mumin_ID);
+    const entry = { action: 'Single delete', records: 1, server: res.data.ms, total: res.total, result: `Mumin_ID ${current.Mumin_ID} deleted` };
+    log(entry);
+    $('#fields').innerHTML = '<div class="empty">Record deleted.</div>';
+    $('#recTitle').textContent = `Mumin_ID ${current.Mumin_ID} (deleted)`;
+    $('#recMode').textContent = 'deleted'; current = null;
+    ['#saveBtn', '#deleteBtn', '#newFromBtn'].forEach((s) => ($(s).disabled = true));
+    out.innerHTML = `<span class="badge ok">deleted from Redis</span> <span class="timing">${fmtMs(res.data.ms)}</span>`;
+    trackMssql(entry, out); refreshStatus();
+  } catch (e) { out.innerHTML = `<span class="badc">${esc(e.message)}</span>`; }
+};
+$('#newFromBtn').onclick = () => {
+  insertMode = true;
+  const idEl = document.querySelector('[data-col="Mumin_ID"]');
+  idEl.disabled = false; idEl.value = ''; idEl.placeholder = 'new Mumin_ID'; idEl.focus();
+  $('#recTitle').textContent = 'New record';
+  $('#recMode').className = 'badge warn'; $('#recMode').textContent = 'insert mode: fill Mumin_ID, edit fields, then Insert';
+  $('#saveBtn').disabled = false; $('#saveBtn').textContent = 'Insert';
+  $('#deleteBtn').disabled = true;
+  document.querySelectorAll('.field').forEach((f) => f.classList.remove('changed'));
+  $('#saveResult').innerHTML = '';
+};
+
+/* ---------- batch ---------- */
+function getIds() { return [...new Set(($('#ids').value.match(/\d+/g) || []).map(Number))]; }
+function updateIdCount() { $('#idCount').textContent = fmtN(getIds().length) + ' ids'; }
+$('#ids').addEventListener('input', updateIdCount);
+$('#clearIds').onclick = () => { $('#ids').value = ''; updateIdCount(); };
+$('#pickBtn').onclick = async () => {
+  const { data } = await api('GET', '/cache/sample-ids?n=' + ($('#pickN').value || 1000));
+  $('#ids').value = data.join(', '); updateIdCount();
+};
+const chunks = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+
+async function batchRun(btn, out, fn) {
+  if (busy) return toast('Another operation is running…');
+  busy = true; btn.disabled = true;
+  const orig = btn.textContent; const t0 = performance.now();
+  const tick = setInterval(() => { btn.innerHTML = `<span class="spin"></span>${((performance.now() - t0) / 1000).toFixed(1)} s`; }, 100);
+  out.innerHTML = '';
+  try { await fn(); } catch (e) { out.innerHTML = `<span class="badc">${esc(e.message)}</span>`; }
+  finally { clearInterval(tick); btn.textContent = orig; btn.disabled = false; busy = false; refreshStatus(); }
+}
+
+$('#bReadBtn').onclick = () => batchRun($('#bReadBtn'), $('#bReadRes'), async () => {
+  const ids = getIds(); if (!ids.length) throw new Error('Add some IDs first');
+  let server = 0, total = 0, fromRedis = 0, fromMssql = 0, notFound = 0; const rows = [];
+  for (const part of chunks(ids, 10000)) {
+    const { data, total: t } = await api('POST', '/mumin/batch/get', { ids: part });
+    server += data.ms; total += t; fromRedis += data.fromRedis; fromMssql += data.fromMssql; notFound += data.notFound.length;
+    if (rows.length < 200) rows.push(...data.data.slice(0, 200 - rows.length));
+  }
+  const summary = `${fmtN(fromRedis)} from Redis · ${fmtN(fromMssql)} from MSSQL · ${fmtN(notFound)} not found`;
+  $('#bReadRes').innerHTML = `<span class="badge ok">done</span> <span class="timing">${fmtMs(server)}</span> · ${summary}`;
+  $('#previewRows').innerHTML = rows.length ? rows.map((r) => `<tr><td>${r.Mumin_ID}</td><td>${esc(r.Full_Name)}</td><td>${esc(r.Jamaat)}</td><td>${esc(r.Mobile_No)}</td><td>${esc(r.Post)}</td><td>${esc(r.Gender)}</td><td class="num">${r.Age ?? ''}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="empty">No rows.</td></tr>';
+  log({ action: 'Batch read', records: ids.length, server, total, result: summary });
+});
+
+$('#bUpdBtn').onclick = () => batchRun($('#bUpdBtn'), $('#bUpdRes'), async () => {
+  const ids = getIds(); if (!ids.length) throw new Error('Add some IDs first');
+  const col = COLUMNS.find((c) => c.name === $('#bCol').value);
+  const value = parseValue(col, $('#bVal').value.trim());
+  let server = 0, total = 0, updated = 0, notFound = 0;
+  for (const part of chunks(ids, 10000)) {
+    const { data, total: t } = await api('PATCH', '/mumin/batch', { items: part.map((Mumin_ID) => ({ Mumin_ID, [col.name]: value })) });
+    server += data.ms; total += t; updated += data.updated; notFound += data.notFound.length;
+  }
+  const out = $('#bUpdRes');
+  const summary = `${fmtN(updated)} updated (${col.name} = ${JSON.stringify(value)})${notFound ? ` · ${fmtN(notFound)} not found` : ''}`;
+  out.innerHTML = `<span class="badge ok">saved in Redis</span> <span class="timing">${fmtMs(server)}</span> · ${esc(summary)}`;
+  const entry = { action: 'Batch update', records: updated, server, total, result: summary };
+  log(entry); await trackMssql(entry, out);
+});
+
+$('#bInsBtn').onclick = () => batchRun($('#bInsBtn'), $('#bInsRes'), async () => {
+  const n = Math.max(1, +$('#bInsN').value || 1); const start = +$('#bInsStart').value;
+  const [tplId] = (await api('GET', '/cache/sample-ids?n=1')).data;
+  if (!tplId) throw new Error('Redis is empty. Load or restore first.');
+  const tpl = (await api('GET', '/mumin/' + tplId)).data.data;
+  const newIds = Array.from({ length: n }, (_, i) => start + i);
+  let server = 0, total = 0, inserted = 0, conflicts = 0;
+  for (const part of chunks(newIds, 10000)) {
+    const items = part.map((id) => ({ ...tpl, Mumin_ID: id, Person_ID: id, Full_Name: 'Test ' + id }));
+    const { data, total: t } = await api('POST', '/mumin/batch', { items });
+    server += data.ms; total += t; inserted += data.inserted; conflicts += data.conflicts.length;
+  }
+  $('#ids').value = newIds.join(', '); updateIdCount();
+  const out = $('#bInsRes');
+  const summary = `${fmtN(inserted)} inserted (IDs ${start}–${start + n - 1})${conflicts ? ` · ${fmtN(conflicts)} already existed` : ''}`;
+  out.innerHTML = `<span class="badge ok">saved in Redis</span> <span class="timing">${fmtMs(server)}</span> · ${esc(summary)}`;
+  const entry = { action: 'Batch insert', records: inserted, server, total, result: summary };
+  log(entry); await trackMssql(entry, out);
+});
+
+$('#bDelBtn').onclick = () => {
+  const ids = getIds();
+  if (!ids.length) return toast('Add some IDs first');
+  if (!confirm(`Delete ${ids.length.toLocaleString()} records? Removed from Redis now and from MSSQL in the background.`)) return;
+  batchRun($('#bDelBtn'), $('#bDelRes'), async () => {
+    let server = 0, total = 0, deleted = 0, notFound = 0;
+    for (const part of chunks(ids, 10000)) {
+      const { data, total: t } = await api('POST', '/mumin/batch/delete', { ids: part });
+      server += data.ms; total += t; deleted += data.deleted; notFound += data.notFound;
+    }
+    const out = $('#bDelRes');
+    const summary = `${fmtN(deleted)} deleted${notFound ? ` · ${fmtN(notFound)} not found` : ''}`;
+    out.innerHTML = `<span class="badge ok">deleted from Redis</span> <span class="timing">${fmtMs(server)}</span> · ${esc(summary)}`;
+    const entry = { action: 'Batch delete', records: deleted, server, total, result: summary };
+    log(entry); await trackMssql(entry, out);
+  });
+};
+
+/* ---------- tabs, theme, init ---------- */
+document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => {
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
+  document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + t.dataset.view));
+}));
+$('#themeBtn').onclick = () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('theme', root.dataset.theme); } catch { /* ignore */ }
+};
+try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch { /* ignore */ }
+
+(async () => {
+  try {
+    COLUMNS = (await api('GET', '/cache/columns')).data;
+    $('#bCol').innerHTML = COLUMNS.filter((c) => c.name !== 'Mumin_ID')
+      .map((c) => `<option value="${c.name}" ${c.name === 'Post' ? 'selected' : ''}>${c.name} (${c.sql.toLowerCase()})</option>`).join('');
+  } catch { toast('Could not load columns: is the API running?'); }
+  refreshStatus();
+})();
+</script>
+</body>
+</html>

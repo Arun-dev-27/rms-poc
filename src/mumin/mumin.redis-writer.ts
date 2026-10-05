@@ -13,6 +13,7 @@ const LUA_CHUNK = 1000;
  * One Lua script per chunk = atomic for every item in it:
  *   update: GET -> merge patch -> SET -> XADD stream -> HSET dirty     (0 if the key is missing)
  *   insert: (missing) SET -> XADD stream -> HSET dirty                 (0 if the key already exists)
+ *   delete: DEL -> XADD stream (op=delete) -> HSET dirty              (0 if the key is missing)
  * KEYS = [stream, dirty, rec1, rec2, ...]   ARGV = [op, json1, json2, ...]
  */
 const WRITE_LUA = `
@@ -27,8 +28,15 @@ for i = 3, #KEYS do
     for f, v in pairs(cjson.decode(ARGV[i - 1])) do rec[f] = v end
   elseif op == 'insert' and not cur then
     rec = cjson.decode(ARGV[i - 1])
+  elseif op == 'delete' and cur then
+    redis.call('DEL', k)
+    local id = tostring(cjson.decode(ARGV[i - 1])['Mumin_ID'])
+    local sid = redis.call('XADD', stream, '*', 'id', id, 'op', 'delete')
+    redis.call('HSET', dirty, id, sid)
   end
-  if rec then
+  if op == 'delete' then
+    out[#out + 1] = cur or 0
+  elseif rec then
     local json = cjson.encode(rec)
     redis.call('SET', k, json)
     local id = tostring(rec['Mumin_ID'])
@@ -66,6 +74,11 @@ export class MuminRedisWriter {
     return this.run('insert', items);
   }
 
+  /** Returns the deleted row per id, or null when the record is not in Redis. */
+  delete(ids: number[]) {
+    return this.run('delete', ids.map((Mumin_ID) => ({ Mumin_ID })));
+  }
+
   async markClean(pairs: [string, string][]) {
     if (!pairs.length) return 0;
     return (this.redis.client as any).muminClean(DIRTY_KEY, ...pairs.flat());
@@ -88,7 +101,7 @@ export class MuminRedisWriter {
     return { streamLength, dirty, dlq };
   }
 
-  private async run(op: 'update' | 'insert', items: (MuminPatch & { Mumin_ID: number })[]): Promise<(MuminRecord | null)[]> {
+  private async run(op: 'update' | 'insert' | 'delete', items: (MuminPatch & { Mumin_ID: number })[]): Promise<(MuminRecord | null)[]> {
     const out: (MuminRecord | null)[] = [];
     for (const part of chunk(items, LUA_CHUNK)) {
       const keys = part.map((i) => `${KEY_PREFIX}${i.Mumin_ID}`);
