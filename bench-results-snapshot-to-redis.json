@@ -1,0 +1,17 @@
+{
+  "snapshot take ms (Redis -> gzip file)": 8312,
+  "snapshot rows": 264615,
+  "snapshot file MB": 44.2,
+  "simulated crash: keys wiped": 264615,
+  "wipe ms": 837.16,
+  "snapshot -> redis ms (load only)": 12349,
+  "change-tracking delta after restore": {
+    "fromVersion": 272,
+    "toVersion": 272,
+    "upserts": 0,
+    "deletes": 0,
+    "ms": 7
+  },
+  "snapshot -> redis total ms": 12368,
+  "redis keys after restore": 264617
+}

@@ -1,0 +1,66 @@
+{
+  "db->redis rows": 264614,
+  "db->redis ms": 52894,
+  "db->redis rows/sec": 5003,
+  "redis memory after load": "475.73M",
+  "snapshot take ms (Redis -> gzip file)": 13995,
+  "snapshot rows": 264614,
+  "snapshot file MB": 44.2,
+  "simulated crash: keys wiped": 264614,
+  "wipe ms": 1957.59,
+  "snapshot -> redis ms (load only)": 18716,
+  "change-tracking delta after restore": {
+    "fromVersion": 523,
+    "toVersion": 523,
+    "upserts": 0,
+    "deletes": 0,
+    "ms": 10
+  },
+  "snapshot -> redis total ms": 18742,
+  "redis keys after restore": 264616,
+  "single update x200 (redis)": {
+    "n": 200,
+    "avgMs": 1.99,
+    "p50Ms": 1.56,
+    "p95Ms": 3.47
+  },
+  "  ...time until all 200 in MSSQL ms": 240.68,
+  "batch update 1000 (redis) ms": 200.51,
+  "  ...updated": 10000,
+  "  ...time until all 1000 in MSSQL ms": 840.33,
+  "batch update 10000 (redis) ms": 2132.17,
+  "  ...time until all 10000 in MSSQL ms": 6171.65,
+  "single insert x100 (redis)": {
+    "n": 100,
+    "avgMs": 10.87,
+    "p50Ms": 9.83,
+    "p95Ms": 16.2
+  },
+  "  ...time until all 100 in MSSQL ms": 130.8,
+  "batch insert 5000 (redis) ms": 1593.19,
+  "  ...inserted": 5000,
+  "  ...time until all 5000 in MSSQL ms": 2421.67,
+  "MSSQL verify (expect 10000 / 5100)": {
+    "updated10k": 10000,
+    "inserted": 5100
+  },
+  "write-behind queue after drain": {
+    "streamLength": 0,
+    "dirty": 0,
+    "dlq": 0
+  },
+  "single update x200 (mssql+redis)": {
+    "n": 200,
+    "avgMs": 12.06,
+    "p50Ms": 9.62,
+    "p95Ms": 28.63
+  },
+  "batch update 1000 (mssql+redis) ms": 720.17,
+  "batch update 10000 (mssql+redis) ms": 6204.72,
+  "batch insert 5000 (mssql+redis) ms": 2739.39,
+  "cleanup: reverted rows / deleted bench rows": {
+    "reverted": 10000,
+    "deleted": 10100,
+    "ms": 6490.61
+  }
+}

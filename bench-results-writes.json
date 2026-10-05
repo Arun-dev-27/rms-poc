@@ -1,0 +1,47 @@
+{
+  "single update x200 (redis)": {
+    "n": 200,
+    "avgMs": 1.17,
+    "p50Ms": 0.75,
+    "p95Ms": 1.83
+  },
+  "  ...time until all 200 in MSSQL ms": 161.62,
+  "batch update 1000 (redis) ms": 118.32,
+  "  ...updated": 10000,
+  "  ...time until all 1000 in MSSQL ms": 459.84,
+  "batch update 10000 (redis) ms": 952.19,
+  "  ...time until all 10000 in MSSQL ms": 3655.43,
+  "single insert x100 (redis)": {
+    "n": 100,
+    "avgMs": 4.84,
+    "p50Ms": 4.67,
+    "p95Ms": 6.2
+  },
+  "  ...time until all 100 in MSSQL ms": 112.29,
+  "batch insert 5000 (redis) ms": 849.8,
+  "  ...inserted": 5000,
+  "  ...time until all 5000 in MSSQL ms": 1684.41,
+  "MSSQL verify (expect 10000 / 5100)": {
+    "updated10k": 10000,
+    "inserted": 5100
+  },
+  "write-behind queue after drain": {
+    "streamLength": 0,
+    "dirty": 0,
+    "dlq": 0
+  },
+  "single update x200 (mssql+redis)": {
+    "n": 200,
+    "avgMs": 5.51,
+    "p50Ms": 5.43,
+    "p95Ms": 5.99
+  },
+  "batch update 1000 (mssql+redis) ms": 490.63,
+  "batch update 10000 (mssql+redis) ms": 4562.34,
+  "batch insert 5000 (mssql+redis) ms": 2126.12,
+  "cleanup: reverted rows / deleted bench rows": {
+    "reverted": 10000,
+    "deleted": 10100,
+    "ms": 5030.99
+  }
+}

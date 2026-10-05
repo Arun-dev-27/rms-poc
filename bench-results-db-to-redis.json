@@ -1,0 +1,6 @@
+{
+  "db->redis rows": 264615,
+  "db->redis ms": 34732,
+  "db->redis rows/sec": 7619,
+  "redis memory after load": "479.42M"
+}
