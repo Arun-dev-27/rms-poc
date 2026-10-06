@@ -49,7 +49,7 @@ export class SnapshotController {
 
   @Post('snapshot')
   snapshot() {
-    return this.snapshots.takeSnapshot();
+    return this.snapshots.takeSnapshotLocked();
   }
 
   /** Restore latest (or { "file": "..." }) snapshot into Redis + change-tracking delta. */

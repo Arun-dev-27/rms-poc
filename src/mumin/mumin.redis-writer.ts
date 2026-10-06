@@ -11,6 +11,7 @@ export const VERSION_KEY = 'mumin:ver';        // Mumin_ID -> version (increment
 export const IDEM_KEY = 'mumin:idem';          // request id -> stored result (per-field TTL, HEXPIRE)
 export const STATUS_KEY = 'mumin:status';      // Mumin_ID -> 'STOPPED' (absent = ACTIVE)
 export const PROC_KEY = 'mumin:processing';    // Mumin_ID -> request id holding the processing lease (TTL)
+export const LEADER_KEY = 'mumin:writer:leader'; // which instance currently writes to MSSQL
 export const STOPINFO_KEY = 'mumin:stopinfo';  // Mumin_ID -> {"stoppedAt","reason"}
 /** Max items in one atomic Lua call (= max items per write request). */
 export const LUA_CHUNK = 1000;
@@ -303,9 +304,9 @@ export class MuminRedisWriter {
 
   async stats() {
     const c = this.redis.client;
-    const [streamLength, dirty, dlq, idempotencyKeys, stopped, processing] = await Promise.all([
-      c.xlen(STREAM_KEY), c.hlen(DIRTY_KEY), c.xlen(DLQ_KEY), c.hlen(IDEM_KEY), c.hlen(STATUS_KEY), c.hlen(PROC_KEY),
+    const [streamLength, dirty, dlq, idempotencyKeys, stopped, processing, writerLeader] = await Promise.all([
+      c.xlen(STREAM_KEY), c.hlen(DIRTY_KEY), c.xlen(DLQ_KEY), c.hlen(IDEM_KEY), c.hlen(STATUS_KEY), c.hlen(PROC_KEY), c.get(LEADER_KEY),
     ]);
-    return { streamLength, dirty, dlq, idempotencyKeys, stopped, processing };
+    return { streamLength, dirty, dlq, idempotencyKeys, stopped, processing, writerLeader };
   }
 }

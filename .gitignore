@@ -4,3 +4,4 @@ dist/
 snapshots/*
 !snapshots/.gitkeep
 app.log
+logs/

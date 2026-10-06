@@ -184,7 +184,9 @@ export class MuminService {
         return { replayed: true, ...this.summaryOf(prev), ms: elapsed(started) };
       }
     }
-    const token = opts.requestId ?? `proc-${randomUUID()}`;
+    // Unique per attempt: a duplicate of the same request on another instance must never release
+    // (or commit with) the original attempt's lease.
+    const token = `${opts.requestId ?? 'proc'}#${randomUUID()}`;
     try {
       await this.writer.begin(id, token, LEASE_MS);
     } catch (e) {

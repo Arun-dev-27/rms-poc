@@ -1,28 +1,40 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
+import { hostname } from 'os';
 import { RedisService } from '../redis/redis.service';
 import { KEY_PREFIX } from './mumin.cache';
 import { MuminRepository } from './mumin.repository';
-import { DIRTY_KEY, DLQ_KEY, MuminRedisWriter, STREAM_KEY } from './mumin.redis-writer';
+import { DIRTY_KEY, DLQ_KEY, LEADER_KEY, MuminRedisWriter, STREAM_KEY } from './mumin.redis-writer';
 import { MuminRecord } from './mumin.types';
 
 const GROUP = 'mssql-writer';
 const READ_COUNT = 2000;
-/** An entry un-ACKed this long belongs to a dead consumer and is taken over. */
-const CLAIM_IDLE_MS = 30000;
-const CLAIM_EVERY_MS = 15000;
+/** Leader lease: renewed every loop (<= ~1 s); if the leader dies another instance takes over after this. */
+const LEADER_LEASE_MS = 15000;
+
+/** Take the lease if free, renew it if ours. KEYS = [leaderKey]  ARGV = [me, leaseMs] */
+const LEADER_LUA = `
+local cur = redis.call('GET', KEYS[1])
+if cur == ARGV[1] then redis.call('PEXPIRE', KEYS[1], ARGV[2]); return 1 end
+if not cur then redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2]); return 1 end
+return 0`;
+const RELEASE_LUA = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
 
 /**
  * Write-behind: drains the Redis Stream into MSSQL.
- *  - consumer group => at-least-once; un-ACKed entries are re-read after a crash/restart
+ *  - ONE active writer across all instances (leader lease in Redis). Every instance runs this worker,
+ *    only the leader consumes, so writes reach MSSQL strictly in stream order: an older value of a
+ *    record can never overwrite a newer one, and concurrent writers cannot deadlock each other.
+ *  - consumer group => at-least-once; a new leader first takes over ALL un-ACKed entries of the
+ *    previous leader (XAUTOCLAIM, oldest first) before reading anything new
  *  - entries carry the FULL row => upsert is idempotent, so re-processing is safe
  *  - a batch is coalesced by Mumin_ID (last write wins) and applied in ONE MSSQL transaction
- *  - rows MSSQL rejects go to a dead-letter stream instead of blocking the queue
+ *  - transient errors (connection, timeout, deadlock) => retried; rows MSSQL rejects => dead-letter
  */
 @Injectable()
 export class WriteBehindWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(WriteBehindWorker.name);
-  private readonly consumer = `app-${process.pid}`;
+  private readonly consumer = `${hostname()}-${process.pid}`;
   private conn?: Redis;
   private running = false;
   private loop?: Promise<void>;
@@ -39,8 +51,10 @@ export class WriteBehindWorker implements OnApplicationBootstrap, OnModuleDestro
 
   async onModuleDestroy() {
     this.running = false;
-    this.conn?.disconnect();
     await this.loop?.catch(() => undefined);
+    // Graceful shutdown: hand leadership over immediately instead of waiting for the lease to expire.
+    await this.redis.client.eval(RELEASE_LUA, 1, LEADER_KEY, this.consumer).catch(() => undefined);
+    this.conn?.disconnect();
   }
 
   async start() {
@@ -51,41 +65,50 @@ export class WriteBehindWorker implements OnApplicationBootstrap, OnModuleDestro
       if (!String(e.message).includes('BUSYGROUP')) throw e;
     });
     this.loop = this.run();
-    this.logger.log('Write-behind worker started');
+    this.logger.log(`Write-behind worker started (${this.consumer})`);
+  }
+
+  private async isLeader(): Promise<boolean> {
+    return (await this.redis.client.eval(LEADER_LUA, 1, LEADER_KEY, this.consumer, LEADER_LEASE_MS)) === 1;
   }
 
   private async run() {
-    let backlog = true; // first drain entries this consumer read but never ACKed
-    let lastClaim = 0;
+    let leader = false;
     while (this.running) {
       try {
-        // Crash recovery across processes: take over entries a dead consumer read but never ACKed.
-        if (Date.now() - lastClaim > CLAIM_EVERY_MS) {
-          lastClaim = Date.now();
-          const claimed = await this.claimStale();
-          if (claimed) this.logger.warn(`Recovered ${claimed} un-persisted writes from dead consumers`);
+        if (!(await this.isLeader())) {
+          if (leader) this.logger.warn('Lost write-behind leadership');
+          leader = false;
+          await sleep(1000);
+          continue;
+        }
+        if (!leader) {
+          // New leader (or recovering from an error): finish every older un-ACKed entry first, in order.
+          leader = true;
+          this.logger.log('Became write-behind leader');
+          const taken = await this.takeOverPending();
+          if (taken) this.logger.warn(`Recovered ${taken} un-persisted writes left by a previous attempt/leader`);
         }
         const res: any = await this.conn!.xreadgroup(
-          'GROUP', GROUP, this.consumer, 'COUNT', READ_COUNT, 'BLOCK', 1000, 'STREAMS', STREAM_KEY, backlog ? '0' : '>',
+          'GROUP', GROUP, this.consumer, 'COUNT', READ_COUNT, 'BLOCK', 1000, 'STREAMS', STREAM_KEY, '>',
         );
         const entries: [string, string[]][] = res?.[0]?.[1] ?? [];
-        if (backlog && entries.length === 0) { backlog = false; continue; }
         if (entries.length) await this.apply(entries);
       } catch (e) {
         if (!this.running) return;
         this.logger.error(`Write-behind batch failed, retrying: ${(e as Error).message}`);
-        await new Promise((r) => setTimeout(r, 2000));
-        backlog = true;
+        await sleep(2000);
+        leader = false; // re-run takeOverPending: the failed batch is retried before anything newer
       }
     }
   }
 
-  /** XAUTOCLAIM entries idle longer than CLAIM_IDLE_MS and apply them; returns how many. */
-  private async claimStale(): Promise<number> {
+  /** Claim ALL pending entries (any consumer, any idle time) and apply them oldest first. Leader only. */
+  private async takeOverPending(): Promise<number> {
     let cursor = '0-0';
     let total = 0;
     do {
-      const res: any = await this.conn!.xautoclaim(STREAM_KEY, GROUP, this.consumer, CLAIM_IDLE_MS, cursor, 'COUNT', READ_COUNT);
+      const res: any = await this.conn!.xautoclaim(STREAM_KEY, GROUP, this.consumer, 0, cursor, 'COUNT', READ_COUNT);
       cursor = res[0];
       const entries: [string, string[]][] = (res[1] ?? []).filter((e: any) => e && e[1]);
       if (entries.length) {
@@ -111,7 +134,7 @@ export class WriteBehindWorker implements OnApplicationBootstrap, OnModuleDestro
     try {
       if (rows.length) await this.repo.upsertMany(rows);
     } catch (e) {
-      // MSSQL unreachable / timeout: throw => nothing is ACKed, the whole batch is retried later.
+      // MSSQL unreachable / timeout / deadlock: throw => nothing is ACKed, the batch is retried in order.
       if (!isRejectedBySqlServer(e)) throw e;
       // A row MSSQL itself rejects: isolate it, dead-letter it, keep the queue moving.
       this.logger.warn(`Batch upsert rejected (${(e as Error).message}); applying row by row`);
@@ -141,19 +164,30 @@ export class WriteBehindWorker implements OnApplicationBootstrap, OnModuleDestro
     const until = Date.now() + timeoutMs;
     while (Date.now() < until) {
       if ((await this.redis.client.hlen(DIRTY_KEY)) === 0) return;
-      await new Promise((r) => setTimeout(r, 20));
+      await sleep(20);
     }
     throw new Error('write-behind did not drain in time');
   }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** SQL Server errors that are about load/locking, not about the data: always retry these. */
+const TRANSIENT_SQL_ERRORS = new Set([
+  1205,  // deadlock victim
+  1222,  // lock request timeout
+  -2,    // timeout
+  233, 10053, 10054, 10060, // connection dropped
+  40197, 40501, 40613, 49918, 49919, 49920, 4221, // service busy / throttled (Azure SQL)
+]);
+
 /**
- * true  = SQL Server executed the statement and refused the data (constraint, conversion, truncation...):
- *         carries a SQL Server error number -> retrying will never succeed -> dead-letter.
- * false = connection / timeout / pool errors -> transient -> retry.
+ * true  = SQL Server refused the DATA (constraint, conversion, truncation...): retrying can never
+ *         succeed -> dead-letter.
+ * false = connection / timeout / deadlock / throttling -> transient -> retry.
  */
 function isRejectedBySqlServer(e: unknown): boolean {
   const err = e as { number?: number; originalError?: { number?: number; info?: { number?: number } } };
   const n = err?.number ?? err?.originalError?.number ?? err?.originalError?.info?.number;
-  return typeof n === 'number' && n > 0;
+  return typeof n === 'number' && n > 0 && !TRANSIENT_SQL_ERRORS.has(n);
 }

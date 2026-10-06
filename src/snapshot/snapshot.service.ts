@@ -12,7 +12,7 @@ import { MssqlService } from '../database/mssql.service';
 import { TABLE } from '../mumin/mumin.columns';
 import { META_KEY, MuminCache } from '../mumin/mumin.cache';
 import * as sql from 'mssql';
-import { DIRTY_KEY, DLQ_KEY, IDEM_KEY, MuminRedisWriter, PROC_KEY, STATUS_KEY, STOPINFO_KEY, STREAM_KEY, VERSION_KEY } from '../mumin/mumin.redis-writer';
+import { DIRTY_KEY, DLQ_KEY, IDEM_KEY, LEADER_KEY, MuminRedisWriter, PROC_KEY, STATUS_KEY, STOPINFO_KEY, STREAM_KEY, VERSION_KEY } from '../mumin/mumin.redis-writer';
 import { MuminRepository } from '../mumin/mumin.repository';
 import { ALL_COLUMNS, KEY_COLUMN, MuminRecord } from '../mumin/mumin.types';
 import { RedisService } from '../redis/redis.service';
@@ -56,7 +56,8 @@ export class SnapshotService implements OnApplicationBootstrap {
       if (f.endsWith('.tmp')) await fs.unlink(path.join(this.dir, f)).catch(() => undefined);
     }
     if (process.env.DISABLE_JOBS === '1') return; // one-time scripts drive everything themselves
-    this.schedule('mumin-snapshot', this.config.get('SNAPSHOT_CRON', '*/15 * * * *'), () => this.takeSnapshot());
+    // Every instance has the timer; the Redis lock makes sure only one of them takes the snapshot.
+    this.schedule('mumin-snapshot', this.config.get('SNAPSHOT_CRON', '*/15 * * * *'), () => this.takeSnapshotLocked());
     this.schedule('mumin-reconcile', this.config.get('RECONCILE_CRON', '*/1 * * * *'), () => this.reconcile());
     // Runs in the background; reads still work meanwhile through cache-aside.
     this.ensureWarm().catch((e) => this.logger.error(`Startup warm-up failed: ${e.message}`));
@@ -141,6 +142,11 @@ export class SnapshotService implements OnApplicationBootstrap {
     const memory = await this.usedMemory();
     this.logger.log(`Loaded ${rows} rows MSSQL -> Redis in ${ms} ms (${memory})`);
     return { source: 'mssql', rows, ms, rowsPerSec: Math.round((rows / ms) * 1000), redisMemory: memory };
+  }
+
+  /** Snapshot under the cluster-wide lock (skipped if another instance is already snapshotting/loading). */
+  takeSnapshotLocked() {
+    return this.withLock(() => this.takeSnapshot(), { skipped: true, reason: 'another instance holds the lock' });
   }
 
   /** Dump every cached row to snapshots/mumin-<ts>.ndjson.gz (atomic: write .tmp then rename). */
@@ -285,7 +291,7 @@ export class SnapshotService implements OnApplicationBootstrap {
     const pick = (k: string) => persistence.match(new RegExp(`${k}:(.*)`))?.[1]?.trim();
     const keys = await this.cache.countKeys();
     // dbsize minus the bookkeeping keys = exact record count, without scanning 264k keys
-    const bookkeeping = await this.redis.client.exists(META_KEY, STREAM_KEY, DLQ_KEY, DIRTY_KEY, LOCK_KEY, VERSION_KEY, IDEM_KEY, STATUS_KEY, PROC_KEY, STOPINFO_KEY);
+    const bookkeeping = await this.redis.client.exists(META_KEY, STREAM_KEY, DLQ_KEY, DIRTY_KEY, LOCK_KEY, VERSION_KEY, IDEM_KEY, STATUS_KEY, PROC_KEY, STOPINFO_KEY, LEADER_KEY);
     return {
       redisKeys: keys,
       redisRecords: keys - bookkeeping,
