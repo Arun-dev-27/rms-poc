@@ -291,7 +291,7 @@ export class SnapshotService implements OnApplicationBootstrap {
     const pick = (k: string) => persistence.match(new RegExp(`${k}:(.*)`))?.[1]?.trim();
     const keys = await this.cache.countKeys();
     // dbsize minus the bookkeeping keys = exact record count, without scanning 264k keys
-    const bookkeeping = await this.redis.client.exists(META_KEY, STREAM_KEY, DLQ_KEY, DIRTY_KEY, LOCK_KEY, VERSION_KEY, IDEM_KEY, STATUS_KEY, PROC_KEY, STOPINFO_KEY, LEADER_KEY, 'mumin:loadtest', 'mumin:loadtest:cancel');
+    const bookkeeping = await this.redis.client.exists(META_KEY, STREAM_KEY, DLQ_KEY, DIRTY_KEY, LOCK_KEY, VERSION_KEY, IDEM_KEY, STATUS_KEY, PROC_KEY, STOPINFO_KEY, LEADER_KEY, 'mumin:loadtest', 'mumin:loadtest:cancel', 'mumin:inflight');
     return {
       redisKeys: keys,
       redisRecords: keys - bookkeeping,

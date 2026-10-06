@@ -59,7 +59,7 @@ export class MuminController {
   // ---- record status: STOP / SKIP ------------------------------------------------------------
 
   /** { "ids": [...], "reason": "..." }  every later request for these records gets 423 Locked */
-  @Post('batch/stop')
+  @Post(['batch/cancel', 'batch/stop'])
   @HttpCode(200)
   stopMany(@Body() body: any) {
     return this.service.stop(validateBatch(body, 'ids', validateId, LUA_CHUNK), reason(body));
@@ -76,7 +76,7 @@ export class MuminController {
     return this.service.state(id);
   }
 
-  @Post(':id/stop')
+  @Post([':id/cancel', ':id/stop'])
   @HttpCode(200)
   stopOne(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
     return this.service.stop([id], reason(body));
@@ -91,7 +91,7 @@ export class MuminController {
   /**
    * 2-phase processing POC: { "workMs": 200, "patch": { "Post": "..." } }
    * 200 processed · 423 record STOPPED (before or during processing; nothing written)
-   * 409 another request is processing this record · 404 unknown record
+   * Waits its turn in the record's line (never 'busy'); 423 also when cancelled while waiting. 404 unknown record
    */
   @Post(':id/process')
   @HttpCode(200)

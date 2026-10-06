@@ -9,7 +9,7 @@ export const DIRTY_KEY = 'mumin:dirty';        // Mumin_ID -> latest stream entr
 export const DLQ_KEY = 'mumin:writes:dlq';     // rows MSSQL rejected
 export const VERSION_KEY = 'mumin:ver';        // Mumin_ID -> version (incremented on every write)
 export const IDEM_KEY = 'mumin:idem';          // request id -> stored result (per-field TTL, HEXPIRE)
-export const STATUS_KEY = 'mumin:status';      // Mumin_ID -> 'STOPPED' (absent = ACTIVE)
+export const STATUS_KEY = 'mumin:status';      // Mumin_ID -> 'CANCELLED' (absent = ACTIVE)
 export const PROC_KEY = 'mumin:processing';    // Mumin_ID -> request id holding the processing lease (TTL)
 export const LEADER_KEY = 'mumin:writer:leader'; // which instance currently writes to MSSQL
 export const STOPINFO_KEY = 'mumin:stopinfo';  // Mumin_ID -> {"stoppedAt","reason"}
@@ -19,7 +19,7 @@ const IDEM_TTL_SECONDS = 24 * 3600;
 
 export type WriteOp = 'insert' | 'update' | 'delete';
 export type RejectCode = 'NOT_FOUND' | 'ALREADY_EXISTS' | 'VERSION_CONFLICT' | 'DUPLICATE_ID_IN_REQUEST' | 'IDEMPOTENCY_KEY_REUSED'
-  | 'RECORD_STOPPED' | 'RECORD_BUSY' | 'LEASE_LOST';
+  | 'RECORD_CANCELLED' | 'RECORD_BUSY' | 'LEASE_LOST' | 'QUEUE_TIMEOUT' | 'TICKET_LOST';
 
 /** The Lua script refused the request; NOTHING was written. */
 export class WriteRejected extends Error {
@@ -73,7 +73,7 @@ for i = 1, n do
   local key = KEYS[K + i]
   local item = cjson.decode(ARGV[A + i])
   local id = tostring(item['Mumin_ID'])
-  if redis.call('HGET', status, id) == 'STOPPED' then release(id); return {'ERR', 'RECORD_STOPPED', id, 'record is stopped; no further processing'} end
+  if redis.call('HGET', status, id) == 'CANCELLED' then release(id); return {'ERR', 'RECORD_CANCELLED', id, 'record is cancelled; request not processed'} end
   local owner = redis.call('HGET', proc, id)
   if lease ~= '' then
     if owner ~= lease then return {'ERR', 'LEASE_LOST', id, 'processing lease expired or taken over'} end
@@ -129,45 +129,38 @@ if wantRows and op ~= 'delete' then
 end
 return out`;
 
-/**
- * BEGIN of a 2-phase request: atomically refuse if STOPPED or already being processed, else take the
- * processing lease (auto-expires, so a crashed request can never block the record forever).
- * KEYS = [status, processing, recordKey]  ARGV = [id, token, leaseMs]
- */
-const BEGIN_LUA = `
-if redis.call('HGET', KEYS[1], ARGV[1]) == 'STOPPED' then return {'ERR', 'RECORD_STOPPED', 'record is stopped; no further processing'} end
-if redis.call('EXISTS', KEYS[3]) == 0 then return {'ERR', 'NOT_FOUND', ''} end
-if redis.call('HSETNX', KEYS[2], ARGV[1], ARGV[2]) == 0 then
-  return {'ERR', 'RECORD_BUSY', 'record is being processed by request ' .. redis.call('HGET', KEYS[2], ARGV[1])}
-end
-redis.call('HPEXPIRE', KEYS[2], tonumber(ARGV[3]), 'FIELDS', 1, ARGV[1])
-return {'OK', ''}`;
-
 /** KEYS = [processing]  ARGV = [id, token]: release only if this request still owns the lease. */
 const RELEASE_LUA = `
 if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
 return 0`;
 
 /**
- * STOP / RESUME many records atomically.
- * KEYS = [status, stopinfo, processing, versions]  ARGV = [action('stop'|'resume'), infoJson, id1..idN]
- * Returns per id: {previousStatus, inFlightRequestId, versionAtThisMoment}
+ * CANCEL / RESUME many records atomically.
+ * Cancel also removes every ticket WAITING in the record's line (they are answered 423 at once via the
+ * "cancel:<id>" event); the ticket being processed (head of the line) is refused at commit.
+ * KEYS = [status, stopinfo, processing, versions]  ARGV = [action('stop'|'resume'), infoJson, queuePrefix, channel, id1..idN]
+ * Returns per id: {previousStatus, inFlightTicket, versionAtThisMoment, waitingCancelled}
  */
 const STATE_LUA = `
 local out = {}
-for i = 3, #ARGV do
+for i = 5, #ARGV do
   local id = ARGV[i]
   local prev = redis.call('HGET', KEYS[1], id) or 'ACTIVE'
+  local waiting = 0
   if ARGV[1] == 'stop' then
-    if prev ~= 'STOPPED' then
-      redis.call('HSET', KEYS[1], id, 'STOPPED')
+    if prev ~= 'CANCELLED' then
+      redis.call('HSET', KEYS[1], id, 'CANCELLED')
       redis.call('HSET', KEYS[2], id, ARGV[2])
     end
+    local q = ARGV[3] .. id
+    local n = redis.call('LLEN', q)
+    if n > 1 then redis.call('LTRIM', q, 0, 0); waiting = n - 1 end
+    redis.call('PUBLISH', ARGV[4], 'cancel:' .. id)
   else
     redis.call('HDEL', KEYS[1], id)
     redis.call('HDEL', KEYS[2], id)
   end
-  out[#out + 1] = {prev, redis.call('HGET', KEYS[3], id) or '', redis.call('HGET', KEYS[4], id) or '0'}
+  out[#out + 1] = {prev, redis.call('HGET', KEYS[3], id) or '', redis.call('HGET', KEYS[4], id) or '0', tostring(waiting)}
 end
 return out`;
 
@@ -184,7 +177,6 @@ export class MuminRedisWriter {
   constructor(private readonly redis: RedisService) {
     this.redis.client.defineCommand('muminWrite', { lua: WRITE_LUA });
     this.redis.client.defineCommand('muminClean', { numberOfKeys: 1, lua: CLEAN_LUA });
-    this.redis.client.defineCommand('muminBegin', { numberOfKeys: 3, lua: BEGIN_LUA });
     this.redis.client.defineCommand('muminRelease', { numberOfKeys: 1, lua: RELEASE_LUA });
     this.redis.client.defineCommand('muminState', { numberOfKeys: 4, lua: STATE_LUA });
   }
@@ -215,12 +207,6 @@ export class MuminRedisWriter {
     };
   }
 
-  /** BEGIN: take the processing lease for one record (throws WriteRejected if stopped / busy / missing). */
-  async begin(id: number, token: string, leaseMs: number): Promise<void> {
-    const res: string[] = await (this.redis.client as any).muminBegin(STATUS_KEY, PROC_KEY, `${KEY_PREFIX}${id}`, String(id), token, leaseMs);
-    if (res[0] === 'ERR') throw new WriteRejected(res[1] as RejectCode, String(id), res[2]);
-  }
-
   async release(id: number, token: string): Promise<void> {
     await (this.redis.client as any).muminRelease(PROC_KEY, String(id), token);
   }
@@ -228,26 +214,30 @@ export class MuminRedisWriter {
   /** STOP or RESUME records atomically; returns the state each record was in at that exact moment. */
   async setState(action: 'stop' | 'resume', ids: number[], reason = '') {
     const info = JSON.stringify({ stoppedAt: new Date().toISOString(), reason });
-    const out: { id: number; previous: string; inFlightRequest: string | null; versionAtStop: number }[] = [];
+    const out: { id: number; previous: string; inFlightRequest: string | null; versionAtStop: number; waitingCancelled: number }[] = [];
     for (const part of chunk(ids, LUA_CHUNK)) {
-      const res: [string, string, string][] = await (this.redis.client as any).muminState(
-        STATUS_KEY, STOPINFO_KEY, PROC_KEY, VERSION_KEY, action, info, ...part.map(String),
+      const res: [string, string, string, string][] = await (this.redis.client as any).muminState(
+        STATUS_KEY, STOPINFO_KEY, PROC_KEY, VERSION_KEY, action, info, 'mumin:q:', 'mumin:events', ...part.map(String),
       );
-      res.forEach(([previous, inFlight, v], i) => out.push({ id: part[i], previous, inFlightRequest: inFlight || null, versionAtStop: Number(v) }));
+      res.forEach(([previous, inFlight, v, w], i) => out.push({
+        id: part[i], previous, inFlightRequest: inFlight || null, versionAtStop: Number(v), waitingCancelled: Number(w),
+      }));
     }
     return out;
   }
 
   async state(id: number) {
     const c = this.redis.client;
-    const [status, processing, info, version] = await Promise.all([
+    const [status, processing, info, version, queued] = await Promise.all([
       c.hget(STATUS_KEY, String(id)), c.hget(PROC_KEY, String(id)), c.hget(STOPINFO_KEY, String(id)), c.hget(VERSION_KEY, String(id)),
+      c.llen(`mumin:q:${id}`),
     ]);
     return {
       Mumin_ID: id,
-      status: status === 'STOPPED' ? 'STOPPED' : processing ? 'PROCESSING' : 'ACTIVE',
+      status: status === 'CANCELLED' ? 'CANCELLED' : processing ? 'PROCESSING' : 'ACTIVE',
       processingRequest: processing,
-      ...(status === 'STOPPED' && info ? JSON.parse(info) : {}),
+      waitingInLine: Math.max(0, queued - 1),
+      ...(status === 'CANCELLED' && info ? JSON.parse(info) : {}),
       version: Number(version ?? 0),
     };
   }
@@ -261,7 +251,7 @@ export class MuminRedisWriter {
     const ids = Object.keys(entries);
     if (!ids.length) return;
     const m = this.redis.client.multi();
-    m.hset(STATUS_KEY, Object.fromEntries(ids.map((id) => [id, 'STOPPED'])));
+    m.hset(STATUS_KEY, Object.fromEntries(ids.map((id) => [id, 'CANCELLED'])));
     m.hset(STOPINFO_KEY, entries);
     await m.exec();
   }
@@ -304,9 +294,9 @@ export class MuminRedisWriter {
 
   async stats() {
     const c = this.redis.client;
-    const [streamLength, dirty, dlq, idempotencyKeys, stopped, processing, writerLeader] = await Promise.all([
-      c.xlen(STREAM_KEY), c.hlen(DIRTY_KEY), c.xlen(DLQ_KEY), c.hlen(IDEM_KEY), c.hlen(STATUS_KEY), c.hlen(PROC_KEY), c.get(LEADER_KEY),
+    const [streamLength, dirty, dlq, idempotencyKeys, stopped, processing, writerLeader, inflight] = await Promise.all([
+      c.xlen(STREAM_KEY), c.hlen(DIRTY_KEY), c.xlen(DLQ_KEY), c.hlen(IDEM_KEY), c.hlen(STATUS_KEY), c.hlen(PROC_KEY), c.get(LEADER_KEY), c.hlen('mumin:inflight'),
     ]);
-    return { streamLength, dirty, dlq, idempotencyKeys, stopped, processing, writerLeader };
+    return { streamLength, dirty, dlq, idempotencyKeys, stopped, cancelled: stopped, processing, writerLeader, inflight };
   }
 }

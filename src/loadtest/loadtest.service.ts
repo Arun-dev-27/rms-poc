@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -21,6 +21,7 @@ export interface LoadTestState {
   instances: string[];
   runner: string;
   heartbeatAt?: string;
+  cancelRequested?: boolean;
   phase?: string;
   phases: Record<string, { title: string; total: number; done: number; elapsedMs: number; statuses: Record<string, number>; perInstance: Record<string, number>; metrics: Record<string, unknown> }>;
   checks: { phase: string; label: string; ok: boolean }[];
@@ -33,13 +34,18 @@ export interface LoadTestState {
  * does not compete with this API process, and mirrors its "@@{json}" progress events into Redis.
  */
 @Injectable()
-export class LoadTestService {
+export class LoadTestService implements OnModuleDestroy {
   private readonly logger = new Logger(LoadTestService.name);
   private child?: ChildProcess;
   private state?: LoadTestState;
   private saveTimer?: NodeJS.Timeout;
 
   constructor(private readonly redis: RedisService, private readonly config: ConfigService) {}
+
+  /** Graceful shutdown of this instance: ask the running test to stop (it still cleans up). */
+  async onModuleDestroy() {
+    if (this.child) await this.cancel();
+  }
 
   async status(): Promise<LoadTestState | { status: 'none' }> {
     const raw = await this.redis.client.get(STATE_KEY);
@@ -77,9 +83,13 @@ export class LoadTestService {
     // cancel requests can arrive at any instance -> poll the flag
     const poll = setInterval(async () => {
       if (!this.child) return clearInterval(poll);
-      if (await this.redis.client.get(CANCEL_KEY)) {
-        this.state!.status = 'cancelled';
-        this.child.kill();
+      // Graceful cancel: the test sees cancelRequested, stops sending load and still runs its cleanup
+      // (resume + restore original values). Hard kill only if it does not finish within 2 minutes.
+      if (!this.state!.cancelRequested && (await this.redis.client.get(CANCEL_KEY))) {
+        this.state!.cancelRequested = true;
+        await this.save();
+        const child = this.child;
+        setTimeout(() => { if (this.child === child) child.kill(); }, 120000);
       }
     }, 500);
     this.saveTimer = setInterval(() => void this.save(), 500);
@@ -102,7 +112,10 @@ export class LoadTestService {
       case 'progress': Object.assign(ph(e.phase), { done: e.done, total: e.total, elapsedMs: e.elapsedMs, statuses: e.statuses, perInstance: e.perInstance }); break;
       case 'metric': ph(e.phase).metrics[e.label] = e.value; break;
       case 'check': s.checks.push({ phase: e.phase, label: e.label, ok: e.ok }); break;
-      case 'end': if (s.status === 'running') s.status = e.pass ? 'passed' : e.error ? 'error' : 'failed'; if (e.error) s.error = e.error; break;
+      case 'end':
+        if (s.status === 'running') s.status = s.cancelRequested ? 'cancelled' : e.pass ? 'passed' : e.error ? 'error' : 'failed';
+        if (e.error) s.error = e.error;
+        break;
     }
   }
 
@@ -114,7 +127,7 @@ export class LoadTestService {
 
   private async onExit(code: number | null) {
     const s = this.state!;
-    if (s.status === 'running') s.status = code === 0 ? 'passed' : 'error';
+    if (s.status === 'running') s.status = s.cancelRequested ? 'cancelled' : code === 0 ? 'passed' : 'error';
     s.finishedAt = new Date().toISOString();
     clearInterval(this.saveTimer);
     this.child = undefined;

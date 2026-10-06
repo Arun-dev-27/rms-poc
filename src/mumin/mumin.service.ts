@@ -1,7 +1,8 @@
 import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 import { MuminCache } from './mumin.cache';
+import { MAX_WAIT_MS, RecordQueue } from './mumin.queue';
 import { LUA_CHUNK, MuminRedisWriter, WriteOp, WriteRejected, WriteResult } from './mumin.redis-writer';
 import { chunk, MuminInsert, MuminRepository } from './mumin.repository';
 import { MuminPatch, MuminRecord } from './mumin.types';
@@ -19,12 +20,11 @@ const REJECT_STATUS: Record<string, number> = {
   VERSION_CONFLICT: HttpStatus.PRECONDITION_FAILED,
   DUPLICATE_ID_IN_REQUEST: HttpStatus.BAD_REQUEST,
   IDEMPOTENCY_KEY_REUSED: HttpStatus.UNPROCESSABLE_ENTITY,
-  RECORD_STOPPED: 423, // Locked
+  RECORD_CANCELLED: 423, // Locked
   RECORD_BUSY: HttpStatus.CONFLICT,
   LEASE_LOST: HttpStatus.CONFLICT,
+  QUEUE_TIMEOUT: HttpStatus.SERVICE_UNAVAILABLE,
 };
-/** Processing lease auto-expires so a crashed request never blocks a record forever. */
-const LEASE_MS = 30000;
 
 /**
  * Read path : cache-aside (Redis first, MSSQL on miss, then back-fill Redis).
@@ -42,6 +42,7 @@ export class MuminService {
     private readonly repo: MuminRepository,
     private readonly cache: MuminCache,
     private readonly writer: MuminRedisWriter,
+    private readonly queue: RecordQueue,
     config: ConfigService,
   ) {
     this.redisFirst = config.get('WRITE_MODE', 'redis-first') !== 'db-first';
@@ -94,8 +95,7 @@ export class MuminService {
       await this.refreshCache([row]);
       return { mode: 'db-first', ms: elapsed(started), data: row };
     }
-    const r = await this.apply('insert', [rec], opts, true);
-    return { mode: 'redis-first', replayed: r.replayed, version: r.items[0]?.version, ms: elapsed(started), data: r.rows[0] ?? (await this.cache.get(rec.Mumin_ID)) };
+    return this.queued('insert', rec.Mumin_ID, rec, opts);
   }
 
   async createMany(recs: MuminInsert[], opts: WriteOptions = {}) {
@@ -117,8 +117,7 @@ export class MuminService {
       await this.refreshCache([row]);
       return { mode: 'db-first', ms: elapsed(started), data: row };
     }
-    const r = await this.apply('update', [{ ...patch, Mumin_ID: id }], opts, true);
-    return { mode: 'redis-first', replayed: r.replayed, version: r.items[0]?.version, ms: elapsed(started), data: r.rows[0] ?? (await this.cache.get(id)) };
+    return this.queued('update', id, { ...patch, Mumin_ID: id }, opts);
   }
 
   async updateMany(items: MuminInsert[], opts: WriteOptions = {}) {
@@ -133,7 +132,8 @@ export class MuminService {
   }
 
   async deleteOne(id: number, opts: WriteOptions = {}) {
-    return this.deleteMany([id], opts);
+    if (!this.redisFirst) return this.deleteMany([id], opts);
+    return this.queued('delete', id, { Mumin_ID: id }, opts);
   }
 
   async deleteMany(ids: number[], opts: WriteOptions = {}) {
@@ -147,13 +147,16 @@ export class MuminService {
     return { mode: 'redis-first', replayed: r.replayed, requested: ids.length, deleted: r.items.length, ms: elapsed(started) };
   }
 
-  // ---------------------------------------------------------------- record status (STOP / SKIP)
+  // ---------------------------------------------------------------- record status (CANCEL)
 
-  /** STOP: every later request for these records is refused (423). In-flight 2-phase requests fail at commit. */
+  /**
+   * CANCEL: the request being processed is refused at commit, everyone waiting in the record's line is
+   * answered 423 at once, and every later request is refused (423) until RESUME.
+   */
   async stop(ids: number[], reason = '') {
     const started = process.hrtime.bigint();
     const res = await this.writer.setState('stop', ids, reason);
-    return { status: 'STOPPED', ms: elapsed(started), records: res };
+    return { status: 'CANCELLED', ms: elapsed(started), records: res };
   }
 
   async resume(ids: number[]) {
@@ -166,50 +169,42 @@ export class MuminService {
     return this.writer.state(id);
   }
 
-  /**
-   * 2-phase processing of one record:
-   *   BEGIN  (Lua) refuse if STOPPED (423) or already processing (409); else take a lease
-   *   WORK   the business processing (simulated here by workMs)
-   *   COMMIT (Lua) refuse if STOPPED meanwhile (423, nothing written) or lease lost (409); else write + release
-   * Every path ends with a response; the lease is always released (and expires by itself after LEASE_MS).
-   */
+  /** Business processing of one record that takes time (simulated by workMs): goes through the line. */
   async processRecord(id: number, patch: MuminPatch, workMs: number, opts: WriteOptions) {
-    const started = process.hrtime.bigint();
-    const item = { ...patch, Mumin_ID: id };
-    const requestHash = createHash('sha1').update(`process|${JSON.stringify(item)}|${workMs}`).digest('base64');
-    if (opts.requestId) {
-      const prev = await this.writer.idempotencyResult(opts.requestId);
-      if (prev) {
-        if (JSON.parse(prev).h !== requestHash) throw toHttp(new WriteRejected('IDEMPOTENCY_KEY_REUSED', '', 'same request id, different request body'));
-        return { replayed: true, ...this.summaryOf(prev), ms: elapsed(started) };
-      }
-    }
-    // Unique per attempt: a duplicate of the same request on another instance must never release
-    // (or commit with) the original attempt's lease.
-    const token = `${opts.requestId ?? 'proc'}#${randomUUID()}`;
-    try {
-      await this.writer.begin(id, token, LEASE_MS);
-    } catch (e) {
-      if (e instanceof WriteRejected && e.code === 'NOT_FOUND' && (await this.warmMissing([id]))) {
-        try { await this.writer.begin(id, token, LEASE_MS); } catch (e2) { throw toHttp(e2); }
-      } else {
-        throw toHttp(e);
-      }
-    }
-    try {
-      if (workMs > 0) await new Promise((r) => setTimeout(r, workMs)); // the "processing"
-      const r = await this.writer.write('update', [item], { requestId: opts.requestId, requestHash, lease: token, wantRows: true });
-      return { replayed: r.replayed, status: 'PROCESSED', version: r.items[0]?.version, workMs, ms: elapsed(started), data: r.rows[0] };
-    } catch (e) {
-      throw toHttp(e);
-    } finally {
-      await this.writer.release(id, token).catch(() => undefined);
-    }
+    return this.queued('update', id, { ...patch, Mumin_ID: id }, opts, workMs);
   }
 
-  private summaryOf(stored: string) {
-    const s = JSON.parse(stored);
-    return { items: s.items.map(([id, version]: [number, number]) => ({ id, version })) };
+  /**
+   * Single-record write, ticket-booking style:
+   *   1. take a ticket in the record's FIFO line (duplicate request id -> answer of the original)
+   *   2. wait for the turn (never "busy" errors; cancel answers waiters immediately with 423)
+   *   3. work (workMs), then COMMIT with the same atomic Lua (cancelled meanwhile -> 423, nothing written)
+   *   4. leave the line -> the next ticket is woken through pub/sub on whichever instance holds it
+   */
+  private async queued(op: WriteOp, id: number, item: MuminInsert, opts: WriteOptions, workMs = 0) {
+    const started = process.hrtime.bigint();
+    const requestHash = createHash('sha1')
+      .update(`${op}|${JSON.stringify(item)}|${JSON.stringify(opts.expected ?? [])}|${workMs}`).digest('base64');
+    try {
+      if (op === 'insert') await this.assertNotInMssql([id]);
+      else await this.warmMissing([id]); // cold cache: load the row before queueing for it
+      const out = await this.queue.run(
+        id, opts.requestId, requestHash,
+        async (ticket) => {
+          if (workMs > 0) await new Promise((r) => setTimeout(r, workMs));
+          return this.writer.write(op, [item], { requestId: opts.requestId, requestHash, expected: opts.expected, wantRows: op !== 'delete', lease: ticket });
+        },
+        (stored): WriteResult => ({ replayed: true, rows: [], items: JSON.parse(stored).items.map(([i, v]: [number, number]) => ({ id: i, version: v })) }),
+      );
+      const r = out.result;
+      return {
+        mode: 'redis-first', status: op === 'delete' ? 'DELETED' : 'PROCESSED', replayed: out.replayed || r.replayed,
+        version: r.items[0]?.version, queuePosition: out.position, waitedMs: out.waitedMs, workMs, ms: elapsed(started),
+        data: op === 'delete' ? undefined : r.rows[0] ?? (await this.cache.get(id)),
+      };
+    } catch (e) {
+      throw toHttp(e);
+    }
   }
 
   /**
@@ -226,7 +221,19 @@ export class MuminService {
     const requestHash = opts.requestId
       ? createHash('sha1').update(`${op}|${JSON.stringify(items)}|${JSON.stringify(opts.expected ?? [])}`).digest('base64')
       : '';
-    const run = () => this.writer.write(op, items, { requestId: opts.requestId, requestHash, expected: opts.expected, wantRows });
+    // A record of the batch is being processed by a queued request right now: wait and retry instead
+    // of failing (the batch is atomic, so nothing was written by the refused attempt).
+    const run = async () => {
+      const until = Date.now() + MAX_WAIT_MS;
+      for (;;) {
+        try {
+          return await this.writer.write(op, items, { requestId: opts.requestId, requestHash, expected: opts.expected, wantRows });
+        } catch (e) {
+          if (!(e instanceof WriteRejected && e.code === 'RECORD_BUSY') || Date.now() > until) throw e;
+          await new Promise((r) => setTimeout(r, 20 + Math.random() * 30));
+        }
+      }
+    };
     try {
       if (op === 'insert') await this.assertNotInMssql(items.map((i) => i.Mumin_ID));
       return await run();

@@ -119,7 +119,7 @@ pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--
     <div class="stat"><div class="label">MSSQL rows</div><div class="value" id="sSql">—</div><div class="hint" id="sCt">change tracking —</div></div>
     <div class="stat"><div class="label">Redis vs MSSQL</div><div class="value" id="sSync">—</div><div class="hint" id="sSyncHint">&nbsp;</div></div>
     <div class="stat"><div class="label">Waiting for MSSQL</div><div class="value" id="sQueue">—</div><div class="hint" id="sQueueHint">queue / dirty / errors</div></div>
-    <div class="stat"><div class="label">Stopped records</div><div class="value" id="sStopped">—</div><div class="hint" id="sProc">processing now —</div></div>
+    <div class="stat"><div class="label">Cancelled records</div><div class="value" id="sStopped">—</div><div class="hint" id="sProc">processing now —</div></div>
     <div class="stat"><div class="label">Last full load</div><div class="value" id="sLoad">—</div><div class="hint" id="sLoadHint">&nbsp;</div></div>
   </section>
 
@@ -202,7 +202,7 @@ pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--
         </div>
         <div class="row">
           <span id="recStatus" class="badge">—</span>
-          <button class="btn secondary" id="stopBtn" disabled>Stop</button>
+          <button class="btn secondary" id="stopBtn" disabled>Cancel</button>
           <button class="btn secondary" id="resumeBtn" disabled>Resume</button>
           <button class="btn secondary" id="newFromBtn" disabled>Insert new (copy of this)</button>
           <button class="btn danger secondary" id="deleteBtn" disabled>Delete record</button>
@@ -211,7 +211,7 @@ pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--
       </div>
       <div class="result" id="saveResult"></div>
       <div class="row" style="margin-top:6px;padding:10px;border:1px dashed var(--border);border-radius:8px">
-        <span style="color:var(--muted);font-size:13px">2-phase processing test: start a slow request, press <b>Stop</b> while it runs, and it is refused at commit (423).</span>
+        <span style="color:var(--muted);font-size:13px">Processing test: start a slow request (start several to form a line), press <b>Cancel</b> while they run: all are cancelled (423).</span>
         <label>work <input id="workMs" type="number" value="5000" min="0" max="60000" style="width:90px"> ms</label>
         <button class="btn small secondary" id="processBtn" disabled>Process</button>
         <span id="processResult"></span>
@@ -262,9 +262,9 @@ pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--
         <div class="result" id="bInsRes"></div>
       </div>
       <div class="card">
-        <h3>Stop / Resume records</h3>
-        <p class="desc">STOP: every later request for these records is refused with 423 (also requests already in progress). RESUME: allowed again.</p>
-        <div class="row"><button class="btn danger secondary" id="bStopBtn">Stop all</button><button class="btn secondary" id="bResumeBtn">Resume all</button></div>
+        <h3>Cancel / Resume records</h3>
+        <p class="desc">CANCEL: the request being processed, everyone waiting in line and every later request for these records get 423. RESUME: allowed again.</p>
+        <div class="row"><button class="btn danger secondary" id="bStopBtn">Cancel all</button><button class="btn secondary" id="bResumeBtn">Resume all</button></div>
         <div class="result" id="bStopRes"></div>
       </div>
       <div class="card">
@@ -286,8 +286,8 @@ pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--
   <section class="view" id="view-load">
     <div class="card">
       <h3>Distributed 1 lakh request test</h3>
-      <p class="desc">Sends the requests to every running API instance at once, while records are STOPPED at random moments.
-        Checks: no request hangs, nothing is written to a stopped record after STOP, duplicates are applied once, races have one winner, and MSSQL = Redis at the end.
+      <p class="desc">Ticket-booking style test over every running API instance. Requests on the same record wait their turn in line, so <b>every request succeeds</b>;
+        a duplicate request is applied once; a <b>cancel</b> cancels the request being processed, everyone waiting in line and every later request; reads always work; MSSQL = Redis at the end.
         The test changes the <code>Post</code> column of ~12,000 records and restores the original values at the end.</p>
       <div class="row">
         <label>Requests <input id="ltReq" type="number" value="100000" min="1000" max="500000" step="1000" style="width:120px"></label>
@@ -491,10 +491,10 @@ function inputFor(col, value) {
 }
 function showStatus(status, version) {
   const b = $('#recStatus');
-  b.className = 'badge ' + (status === 'STOPPED' ? 'warn' : status === 'PROCESSING' ? 'mssql' : 'ok');
-  b.textContent = (status || 'ACTIVE') + (version != null ? ' · v' + version : '');
-  $('#stopBtn').disabled = status === 'STOPPED';
-  $('#resumeBtn').disabled = status !== 'STOPPED';
+  b.className = 'badge ' + (status === 'CANCELLED' ? 'warn' : status === 'PROCESSING' ? 'mssql' : 'ok');
+  b.textContent = (status || 'ACTIVE') + (version != null ? ' · v' + version : '') + (window.__lineLen ? ' · ' + window.__lineLen + ' waiting' : '');
+  $('#stopBtn').disabled = status === 'CANCELLED';
+  $('#resumeBtn').disabled = status !== 'CANCELLED';
 }
 function renderRecord(rec, source, ms, version, status) {
   current = rec; insertMode = false; currentVersion = version ?? 0;
@@ -595,11 +595,11 @@ async function setRecordState(action) {
   if (!current) return;
   const out = $('#saveResult');
   try {
-    const { data, total } = await api('POST', '/mumin/' + current.Mumin_ID + '/' + action, action === 'stop' ? { reason: 'stopped from UI' } : {});
+    const { data, total } = await api('POST', '/mumin/' + current.Mumin_ID + '/' + (action === 'stop' ? 'cancel' : action), action === 'stop' ? { reason: 'cancelled from UI' } : {});
     const r = data.records[0];
-    const extra = action === 'stop' && r.inFlightRequest ? ' · a request was in flight: it will be refused at commit' : '';
+    const extra = action === 'stop' ? (r.inFlightRequest ? ' · 1 request being processed: refused at commit' : '') + (r.waitingCancelled ? ' · ' + r.waitingCancelled + ' waiting in line: cancelled' : '') : '';
     out.innerHTML = '<span class="badge ' + (action === 'stop' ? 'warn' : 'ok') + '">' + data.status + '</span> <span class="timing">' + fmtMs(data.ms) + '</span> · was ' + r.previous + extra;
-    log({ action: action === 'stop' ? 'STOP record' : 'RESUME record', records: 1, server: data.ms, total, result: 'Mumin_ID ' + current.Mumin_ID + ': ' + r.previous + ' → ' + data.status + extra });
+    log({ action: action === 'stop' ? 'CANCEL record' : 'RESUME record', records: 1, server: data.ms, total, result: 'Mumin_ID ' + current.Mumin_ID + ': ' + r.previous + ' → ' + data.status + extra });
     const st = (await api('GET', '/mumin/' + current.Mumin_ID + '/status')).data;
     showStatus(st.status, st.version);
   } catch (e) { out.innerHTML = '<span class="badc">' + esc(e.message) + '</span>'; }
@@ -613,7 +613,7 @@ $('#processBtn').onclick = async () => {
   const out = $('#processResult');
   const t0 = performance.now();
   const tick = setInterval(() => { out.innerHTML = '<span class="spin"></span>processing… ' + ((performance.now() - t0) / 1000).toFixed(1) + ' s'; }, 100);
-  setTimeout(async () => { try { const st = (await api('GET', '/mumin/' + id + '/status')).data; showStatus(st.status, st.version); } catch (e) { /* ignore */ } }, 150);
+  setTimeout(async () => { try { const st = (await api('GET', '/mumin/' + id + '/status')).data; window.__lineLen = st.waitingInLine; showStatus(st.status, st.version); window.__lineLen = 0; } catch (e) { /* ignore */ } }, 150);
   try {
     const { data, total } = await api('POST', '/mumin/' + id + '/process', { workMs, patch: { Post: 'PROCESSED-' + new Date().toLocaleTimeString() } });
     out.innerHTML = '<span class="badge ok">processed</span> <span class="timing">' + fmtMs(data.ms) + '</span> · v' + data.version;
@@ -720,11 +720,11 @@ async function batchState(action) {
   batchRun(action === 'stop' ? $('#bStopBtn') : $('#bResumeBtn'), $('#bStopRes'), async () => {
     let server = 0, total = 0, n = 0;
     for (const part of chunks(ids, 1000)) {
-      const { data, total: t } = await api('POST', '/mumin/batch/' + action, action === 'stop' ? { ids: part, reason: 'stopped from UI (batch)' } : { ids: part });
+      const { data, total: t } = await api('POST', '/mumin/batch/' + (action === 'stop' ? 'cancel' : action), action === 'stop' ? { ids: part, reason: 'cancelled from UI (batch)' } : { ids: part });
       server += data.ms; total += t; n += data.records.length;
     }
-    $('#bStopRes').innerHTML = '<span class="badge ' + (action === 'stop' ? 'warn' : 'ok') + '">' + (action === 'stop' ? 'STOPPED' : 'ACTIVE') + '</span> <span class="timing">' + fmtMs(server) + '</span> · ' + fmtN(n) + ' records';
-    log({ action: action === 'stop' ? 'Batch STOP' : 'Batch RESUME', records: n, server, total, result: fmtN(n) + ' records' });
+    $('#bStopRes').innerHTML = '<span class="badge ' + (action === 'stop' ? 'warn' : 'ok') + '">' + (action === 'stop' ? 'CANCELLED' : 'ACTIVE') + '</span> <span class="timing">' + fmtMs(server) + '</span> · ' + fmtN(n) + ' records';
+    log({ action: action === 'stop' ? 'Batch CANCEL' : 'Batch RESUME', records: n, server, total, result: fmtN(n) + ' records' });
   });
 }
 $('#bStopBtn').onclick = () => batchState('stop');
@@ -749,12 +749,13 @@ $('#bDelBtn').onclick = () => {
 
 /* ---------- 1 lakh load test ---------- */
 const PHASES = [
-  ['D1', 'Cancellation + concurrency under load'],
-  ['D2', 'Same request on two instances at once'],
-  ['D3', 'Race: all instances update the same record'],
-  ['CLEANUP', 'Resume, MSSQL vs Redis, restore'],
+  ['T1', 'Everything succeeds: 1 lakh requests, heavy competition, no cancel'],
+  ['T2', 'Cancel during load: cancelled records stop, everything else succeeds'],
+  ['T3', 'No duplicates: same request sent to two instances at once'],
+  ['T4', 'Show cancelled: everyone waiting in line is cancelled at once'],
+  ['CLEANUP', 'Resume, no leftovers, MSSQL vs Redis, restore'],
 ];
-function chipClass(k) { return k.startsWith('200') ? 's200' : k.startsWith('423') ? 's423' : k.startsWith('409') ? 's409' : k.startsWith('412') ? 's412' : 'serr'; }
+function chipClass(k) { return k === '200 read' ? 's409' : k.startsWith('200') ? 's200' : k.startsWith('423') ? 's423' : k.startsWith('409') ? 's409' : k.startsWith('412') ? 's412' : 'serr'; }
 function renderLoadTest(st) {
   const running = st.status === 'running';
   $('#ltStart').disabled = running; $('#ltCancel').disabled = !running;
@@ -780,12 +781,14 @@ function renderLoadTest(st) {
       + '<div><b>' + fmtN(rps) + '</b><span>requests / second</span></div>'
       + '<div><b>' + (p.elapsedMs / 1000).toFixed(1) + ' s</b><span>elapsed</span></div>'
       + (lat ? '<div><b>' + lat.p50 + ' / ' + lat.p95 + ' / ' + lat.p99 + '</b><span>latency ms p50 / p95 / p99</span></div>' : '')
-      + (m['records STOPPED during run'] ? '<div><b>' + String(m['records STOPPED during run']).split(' ')[0] + '</b><span>records stopped</span></div>' : '')
-      + (m['requests IN FLIGHT when their record was STOPPED'] ? '<div><b>' + String(m['requests IN FLIGHT when their record was STOPPED']).split(' ')[0] + '</b><span>stopped mid-processing</span></div>' : '')
+      + (m['time waiting in line ms'] ? '<div><b>' + m['time waiting in line ms'].p50 + ' / ' + m['time waiting in line ms'].p95 + '</b><span>wait in line ms p50 / p95</span></div>' : '')
+      + (m['records cancelled'] ? '<div><b>' + String(m['records cancelled']).split(' ')[0] + '</b><span>records cancelled</span></div>' : '')
+      + (m['requests waiting in line at cancel (cleared at once)'] != null ? '<div><b>' + fmtN(m['requests waiting in line at cancel (cleared at once)']) + '</b><span>waiting in line, cancelled at once</span></div>' : '')
+      + (m['cancel -> answer time for cancelled requests ms'] ? '<div><b>' + m['cancel -> answer time for cancelled requests ms'].p50 + ' / ' + m['cancel -> answer time for cancelled requests ms'].max + '</b><span>cancel → answer ms (p50 / max)</span></div>' : '')
       + '</div>' : '';
     const chips = Object.entries(p.statuses || {}).sort().map(([k, v]) => '<span class="chip ' + chipClass(k) + '">' + esc(k) + ': ' + fmtN(v) + '</span>').join('');
     const inst = Object.entries(p.perInstance || {}).sort().map(([k, v]) => '<span class="chip">' + esc(k) + ': ' + fmtN(v) + '</span>').join('');
-    const extra = Object.entries(m).filter(([k]) => !['latency ms', 'requests per instance', 'responses', 'time / throughput', 'records STOPPED during run', 'requests IN FLIGHT when their record was STOPPED'].includes(k))
+    const extra = Object.entries(m).filter(([k]) => !['latency ms', 'requests per instance', 'responses', 'time / throughput', 'time waiting in line ms', 'cancel -> answer time for cancelled requests ms'].includes(k))
       .map(([k, v]) => '<li><span style="color:var(--muted)">' + esc(k) + ':</span> ' + esc(typeof v === 'object' ? JSON.stringify(v) : v) + '</li>').join('');
     return '<div class="phase"><h4>' + id + ' · ' + name + '</h4><div class="sub">' + esc(p.title) + '</div>'
       + (p.total ? '<div class="bar"><div style="width:' + pct.toFixed(1) + '%"></div></div>' : '')
@@ -813,7 +816,7 @@ $('#ltStart').onclick = async () => {
     pollLoadTest();
   } catch (e) { toast(e.message); }
 };
-$('#ltCancel').onclick = async () => { if (confirm('Cancel the running test? (original values may not be restored)')) await api('POST', '/loadtest/cancel'); };
+$('#ltCancel').onclick = async () => { if (confirm('Cancel the running test? It stops sending requests, then still resumes the records and restores the original values.')) await api('POST', '/loadtest/cancel'); };
 
 /* ---------- tabs, theme, init ---------- */
 function showTab(view) {
