@@ -18,6 +18,9 @@ export interface LoadTestState {
   finishedAt?: string;
   requests: number;
   concurrency: number;
+  mode: 'many' | 'single';
+  recordId?: number;
+  samples: { phase: string; title: string; request: unknown; response: unknown }[];
   instances: string[];
   runner: string;
   heartbeatAt?: string;
@@ -59,7 +62,7 @@ export class LoadTestService implements OnModuleDestroy {
     return s;
   }
 
-  async start(requests: number, concurrency: number) {
+  async start(requests: number, concurrency: number, mode: 'many' | 'single' = 'many', recordId?: number) {
     const current = await this.status();
     if (current.status === 'running') throw new ConflictException('A load test is already running');
     const instances = await this.reachableInstances();
@@ -67,12 +70,14 @@ export class LoadTestService implements OnModuleDestroy {
     const runner = `${this.config.get('INSTANCE_NAME', 'app')}:${process.env.PORT ?? 3000}`;
     this.state = {
       id: randomUUID(), status: 'running', startedAt: new Date().toISOString(), requests, concurrency,
-      instances, runner, phases: {}, checks: [], log: [],
+      instances, runner, phases: {}, checks: [], log: [], mode, recordId, samples: [],
     };
     await this.redis.client.del(CANCEL_KEY);
     await this.save();
 
-    this.child = spawn(process.execPath, [join(__dirname, '..', 'cli', 'dtest.js'), String(requests), String(concurrency)], {
+    const script = mode === 'single' ? 'single.js' : 'dtest.js';
+    const args = [String(requests), String(concurrency), ...(mode === 'single' && recordId ? [String(recordId)] : [])];
+    this.child = spawn(process.execPath, [join(__dirname, '..', 'cli', script), ...args], {
       cwd: process.cwd(),
       env: { ...process.env, API_PORTS: ports.join(','), PROGRESS_JSON: '1' },
       windowsHide: true,
@@ -93,7 +98,7 @@ export class LoadTestService implements OnModuleDestroy {
       }
     }, 500);
     this.saveTimer = setInterval(() => void this.save(), 500);
-    this.logger.log(`Load test started: ${requests} requests over ${instances.join(', ')}`);
+    this.logger.log(`Load test (${mode}) started: ${requests} requests over ${instances.join(', ')}`);
     return this.state;
   }
 
@@ -110,8 +115,12 @@ export class LoadTestService implements OnModuleDestroy {
     switch (e.type) {
       case 'phase': s.phase = e.phase; Object.assign(ph(e.phase), { title: e.title, total: e.total }); break;
       case 'progress': Object.assign(ph(e.phase), { done: e.done, total: e.total, elapsedMs: e.elapsedMs, statuses: e.statuses, perInstance: e.perInstance }); break;
-      case 'metric': ph(e.phase).metrics[e.label] = e.value; break;
+      case 'metric':
+        if (e.label === 'record') s.recordId = e.value;
+        else ph(e.phase).metrics[e.label] = e.value;
+        break;
       case 'check': s.checks.push({ phase: e.phase, label: e.label, ok: e.ok }); break;
+      case 'sample': s.samples.push({ phase: e.phase, title: e.title, request: e.request, response: e.response }); break;
       case 'end':
         if (s.status === 'running') s.status = s.cancelRequested ? 'cancelled' : e.pass ? 'passed' : e.error ? 'error' : 'failed';
         if (e.error) s.error = e.error;

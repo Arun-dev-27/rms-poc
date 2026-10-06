@@ -78,6 +78,7 @@ for i = 1, n do
   if lease ~= '' then
     if owner ~= lease then return {'ERR', 'LEASE_LOST', id, 'processing lease expired or taken over'} end
   elseif owner then
+    -- a slow request holds the record (or the record was just handed to the next one in line)
     return {'ERR', 'RECORD_BUSY', id, 'record is being processed by request ' .. owner}
   end
   if seen[id] then return {'ERR', 'DUPLICATE_ID_IN_REQUEST', id, ''} end

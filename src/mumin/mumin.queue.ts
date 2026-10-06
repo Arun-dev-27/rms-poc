@@ -38,6 +38,7 @@ if rid ~= '' then
   redis.call('HPEXPIRE', inflight, lease, 'FIELDS', 1, rid)
 end
 local n = redis.call('RPUSH', queue, ticket)
+redis.call('PEXPIRE', queue, lease * 6) -- an abandoned line (its servers died) disappears by itself
 if n == 1 then
   redis.call('HSET', proc, id, ticket)
   redis.call('HPEXPIRE', proc, lease, 'FIELDS', 1, id)
@@ -54,6 +55,7 @@ const CHECK_LUA = `
 local status, queue, proc, inflight = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
 local id, ticket, lease, claim, ch, rid = ARGV[1], ARGV[2], tonumber(ARGV[3]), tonumber(ARGV[4]), ARGV[5], ARGV[6]
 if rid ~= '' and redis.call('HGET', inflight, rid) == ticket then redis.call('HPEXPIRE', inflight, lease, 'FIELDS', 1, rid) end
+redis.call('PEXPIRE', queue, lease * 6) -- someone is still waiting: keep the line
 if redis.call('HGET', status, id) == 'CANCELLED' then
   redis.call('LREM', queue, 0, ticket)
   return {'ERR', 'RECORD_CANCELLED'}
@@ -101,8 +103,9 @@ end
 if rid ~= '' then redis.call('PUBLISH', ch, 'done:' .. rid) end
 return 1`;
 
-/** KEYS = [processing, inflight]  ARGV = [id, ticket, leaseMs, requestId]: keep my lease + in-progress marker alive */
+/** KEYS = [processing, inflight, queue]  ARGV = [id, ticket, leaseMs, requestId]: keep my lease, marker and line alive */
 const RENEW_LUA = `
+redis.call('PEXPIRE', KEYS[3], tonumber(ARGV[3]) * 6)
 if ARGV[4] ~= '' and redis.call('HGET', KEYS[2], ARGV[4]) == ARGV[2] then
   redis.call('HPEXPIRE', KEYS[2], tonumber(ARGV[3]), 'FIELDS', 1, ARGV[4])
 end
@@ -131,7 +134,7 @@ export class RecordQueue implements OnModuleInit, OnModuleDestroy {
     c.defineCommand('qJoin', { numberOfKeys: 5, lua: JOIN_LUA });
     c.defineCommand('qCheck', { numberOfKeys: 4, lua: CHECK_LUA });
     c.defineCommand('qLeave', { numberOfKeys: 3, lua: LEAVE_LUA });
-    c.defineCommand('qRenew', { numberOfKeys: 2, lua: RENEW_LUA });
+    c.defineCommand('qRenew', { numberOfKeys: 3, lua: RENEW_LUA });
   }
 
   async onModuleInit() {
@@ -183,7 +186,7 @@ export class RecordQueue implements OnModuleInit, OnModuleDestroy {
   private async process<T>(id: number, ticket: string, rid: string, position: number, started: number, work: (t: string) => Promise<T>) {
     const waitedMs = Date.now() - started;
     const renew = setInterval(() => {
-      (this.redis.client as any).qRenew(PROC_KEY, INFLIGHT_KEY, String(id), ticket, LEASE_MS, rid).catch(() => undefined);
+      (this.redis.client as any).qRenew(PROC_KEY, INFLIGHT_KEY, this.queueKey(id), String(id), ticket, LEASE_MS, rid).catch(() => undefined);
     }, RENEW_EVERY_MS);
     try {
       return { result: await work(ticket), replayed: false, position, waitedMs };

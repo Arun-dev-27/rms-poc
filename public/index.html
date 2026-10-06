@@ -96,6 +96,16 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .banner { padding: 14px 16px; border-radius: 10px; font-weight: 650; font-size: 15px; margin-top: 12px; }
 .banner.pass { background: var(--ok-weak); color: var(--ok); } .banner.fail { background: var(--bad-weak); color: var(--bad); }
 .banner.run { background: var(--accent-weak); color: var(--accent); }
+.samples { display: grid; gap: 12px; margin-top: 12px; }
+.sample { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.sample h5 { margin: 0; padding: 9px 14px; font-size: 13px; background: var(--panel-2); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.sample .rr { display: grid; grid-template-columns: 1fr 1fr; }
+.sample .rr > div { padding: 10px 14px; min-width: 0; }
+.sample .rr > div + div { border-left: 1px solid var(--border); }
+.sample .lbl { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: var(--muted); margin-bottom: 4px; }
+.sample pre { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.http { font-weight: 700; } .http.ok { color: var(--ok); } .http.no { color: var(--warn); }
+@media (max-width: 800px) { .sample .rr { grid-template-columns: 1fr; } .sample .rr > div + div { border-left: none; border-top: 1px solid var(--border); } }
 pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--panel-2); padding: 10px; border-radius: 8px; white-space: pre-wrap; }
 @media (max-width: 640px) { main { padding: 14px 16px 40px; } header { padding: 12px 16px; } .stat .value { font-size: 19px; } }
 </style>
@@ -290,6 +300,11 @@ pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--
         a duplicate request is applied once; a <b>cancel</b> cancels the request being processed, everyone waiting in line and every later request; reads always work; MSSQL = Redis at the end.
         The test changes the <code>Post</code> column of ~12,000 records and restores the original values at the end.</p>
       <div class="row">
+        <label>Test <select id="ltMode">
+          <option value="single">ONE record gets all requests</option>
+          <option value="many">Many records (cancel, duplicates, races)</option>
+        </select></label>
+        <label id="ltRecWrap">Mumin_ID <input id="ltRec" type="number" placeholder="random" style="width:130px"></label>
         <label>Requests <input id="ltReq" type="number" value="100000" min="1000" max="500000" step="1000" style="width:120px"></label>
         <label>Concurrency <input id="ltConc" type="number" value="400" min="1" max="2000" style="width:90px"></label>
         <button class="btn" id="ltStart">Start test</button>
@@ -300,6 +315,10 @@ pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--
     </div>
     <div id="ltBanner"></div>
     <div id="ltPhases"></div>
+    <div id="ltSamplesWrap" style="display:none">
+      <div class="section-title">Real requests and responses from this run</div>
+      <div class="samples" id="ltSamples"></div>
+    </div>
     <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">Raw test output</summary><pre class="log" id="ltLog"></pre></details>
   </section>
 
@@ -748,6 +767,11 @@ $('#bDelBtn').onclick = () => {
 };
 
 /* ---------- 1 lakh load test ---------- */
+const PHASES_SINGLE = [
+  ['S1', 'One record, 1 lakh requests: all must succeed, one at a time'],
+  ['S2', 'One record, 1 lakh requests, cancelled after 30%'],
+  ['CLEANUP', 'Resume, nothing left over, MSSQL row = Redis row, restore'],
+];
 const PHASES = [
   ['T1', 'Everything succeeds: 1 lakh requests, heavy competition, no cancel'],
   ['T2', 'Cancel during load: cancelled records stop, everything else succeeds'],
@@ -768,7 +792,9 @@ function renderLoadTest(st) {
   $('#ltBanner').innerHTML = running ? '<div class="banner run"><span class="spin"></span>Running ' + esc(st.phase || '') + '… ' + passed + ' checks passed so far' + (failed ? ', ' + failed + ' failed' : '') + '</div>'
     : st.status === 'passed' ? '<div class="banner pass">ALL ' + st.checks.length + ' CHECKS PASSED</div>'
     : '<div class="banner fail">' + st.status.toUpperCase() + (st.error ? ': ' + esc(st.error) : '') + ' · ' + passed + ' passed, ' + failed + ' failed</div>';
-  $('#ltPhases').innerHTML = PHASES.map(([id, name]) => {
+  const phases = st.mode === 'single' ? PHASES_SINGLE : PHASES;
+  if (st.mode === 'single' && st.recordId) $('#ltInfo').innerHTML += ' · record <b>Mumin_ID ' + st.recordId + '</b>';
+  $('#ltPhases').innerHTML = phases.map(([id, name]) => {
     const p = st.phases[id];
     const checks = st.checks.filter((c) => c.phase === id);
     if (!p) return '<div class="phase pending"><h4>' + id + ' · ' + name + '</h4><div class="sub">waiting…</div></div>';
@@ -781,6 +807,8 @@ function renderLoadTest(st) {
       + '<div><b>' + fmtN(rps) + '</b><span>requests / second</span></div>'
       + '<div><b>' + (p.elapsedMs / 1000).toFixed(1) + ' s</b><span>elapsed</span></div>'
       + (lat ? '<div><b>' + lat.p50 + ' / ' + lat.p95 + ' / ' + lat.p99 + '</b><span>latency ms p50 / p95 / p99</span></div>' : '')
+      + (m['writes applied'] ? '<div><b>' + String(m['writes applied']).split(' ')[0] + '</b><span>writes applied</span></div>' : '')
+      + (m['version before -> after'] ? '<div><b>' + esc(m['version before -> after']) + '</b><span>version before → after</span></div>' : '')
       + (m['time waiting in line ms'] ? '<div><b>' + m['time waiting in line ms'].p50 + ' / ' + m['time waiting in line ms'].p95 + '</b><span>wait in line ms p50 / p95</span></div>' : '')
       + (m['records cancelled'] ? '<div><b>' + String(m['records cancelled']).split(' ')[0] + '</b><span>records cancelled</span></div>' : '')
       + (m['requests waiting in line at cancel (cleared at once)'] != null ? '<div><b>' + fmtN(m['requests waiting in line at cancel (cleared at once)']) + '</b><span>waiting in line, cancelled at once</span></div>' : '')
@@ -788,13 +816,24 @@ function renderLoadTest(st) {
       + '</div>' : '';
     const chips = Object.entries(p.statuses || {}).sort().map(([k, v]) => '<span class="chip ' + chipClass(k) + '">' + esc(k) + ': ' + fmtN(v) + '</span>').join('');
     const inst = Object.entries(p.perInstance || {}).sort().map(([k, v]) => '<span class="chip">' + esc(k) + ': ' + fmtN(v) + '</span>').join('');
-    const extra = Object.entries(m).filter(([k]) => !['latency ms', 'requests per instance', 'responses', 'time / throughput', 'time waiting in line ms', 'cancel -> answer time for cancelled requests ms'].includes(k))
+    const extra = Object.entries(m).filter(([k]) => !['latency ms', 'requests per instance', 'responses', 'time / throughput', 'time waiting in line ms', 'cancel -> answer time for cancelled requests ms', 'version before -> after'].includes(k))
       .map(([k, v]) => '<li><span style="color:var(--muted)">' + esc(k) + ':</span> ' + esc(typeof v === 'object' ? JSON.stringify(v) : v) + '</li>').join('');
     return '<div class="phase"><h4>' + id + ' · ' + name + '</h4><div class="sub">' + esc(p.title) + '</div>'
       + (p.total ? '<div class="bar"><div style="width:' + pct.toFixed(1) + '%"></div></div>' : '')
       + nums + (chips ? '<div class="chips">' + chips + '</div>' : '') + (inst ? '<div class="chips" title="requests per instance">' + inst + '</div>' : '')
       + (checks.length || extra ? '<ul class="checks">' + checks.map((c) => '<li><span class="' + (c.ok ? 'ok' : 'no') + '">' + (c.ok ? '✓ PASS' : '✗ FAIL') + '</span>' + esc(c.label) + '</li>').join('') + extra + '</ul>' : '')
       + '</div>';
+  }).join('');
+  const samples = st.samples || [];
+  $('#ltSamplesWrap').style.display = samples.length ? '' : 'none';
+  $('#ltSamples').innerHTML = samples.map((x) => {
+    const rq = x.request, rs = x.response;
+    const hdr = Object.entries(rq.headers || {}).map(([k, v]) => k + ': ' + v).join('\n');
+    const reqText = rq.method + ' ' + rq.url + (hdr ? '\n' + hdr : '') + (rq.body !== undefined ? '\n\n' + JSON.stringify(rq.body, null, 2) : '');
+    const ok = rs.status === 200;
+    return '<div class="sample"><h5><span>' + esc(x.phase) + ' · ' + esc(x.title) + '</span><span class="http ' + (ok ? 'ok' : 'no') + '">HTTP ' + rs.status + ' · ' + esc(rs.instance) + ' · ' + rs.ms + ' ms</span></h5>'
+      + '<div class="rr"><div><div class="lbl">REQUEST</div><pre>' + esc(reqText) + '</pre></div>'
+      + '<div><div class="lbl">RESPONSE</div><pre>' + esc(JSON.stringify(rs.body, null, 2)) + '</pre></div></div></div>';
   }).join('');
   const log = $('#ltLog'); const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
   log.textContent = (st.log || []).join('\n'); if (atBottom) log.scrollTop = log.scrollHeight;
@@ -811,11 +850,14 @@ async function pollLoadTest() {
 $('#ltStart').onclick = async () => {
   if (!confirm('Start the load test? It sends ' + fmtN(+$('#ltReq').value) + ' requests to all running instances (takes about a minute or two).')) return;
   try {
-    await api('POST', '/loadtest/start', { requests: +$('#ltReq').value, concurrency: +$('#ltConc').value });
+    const mode = $('#ltMode').value;
+    const rec = $('#ltRec').value.trim();
+    await api('POST', '/loadtest/start', { requests: +$('#ltReq').value, concurrency: +$('#ltConc').value, mode, ...(mode === 'single' && rec ? { recordId: +rec } : {}) });
     log({ action: 'Load test started', records: +$('#ltReq').value, result: 'see the 1 lakh load test tab' });
     pollLoadTest();
   } catch (e) { toast(e.message); }
 };
+$('#ltMode').onchange = () => { $('#ltRecWrap').style.display = $('#ltMode').value === 'single' ? '' : 'none'; };
 $('#ltCancel').onclick = async () => { if (confirm('Cancel the running test? It stops sending requests, then still resumes the records and restores the original values.')) await api('POST', '/loadtest/cancel'); };
 
 /* ---------- tabs, theme, init ---------- */

@@ -188,6 +188,29 @@ export class MuminService {
     try {
       if (op === 'insert') await this.assertNotInMssql([id]);
       else await this.warmMissing([id]); // cold cache: load the row before queueing for it
+      if (workMs === 0) {
+        // Instant write: Redis runs Lua scripts one at a time, so ONE atomic call already is "one request
+        // at a time" (same cancel / duplicate / version checks) -> no line needed. Only while a SLOW request
+        // holds the record do we wait (short back-off) so it is never interrupted. A cancel ends the wait
+        // with 423 on the next try.
+        const waitStart = Date.now();
+        let delay = 2;
+        for (;;) {
+          try {
+            const r = await this.writer.write(op, [item], { requestId: opts.requestId, requestHash, expected: opts.expected, wantRows: op !== 'delete' });
+            return {
+              mode: 'redis-first', status: op === 'delete' ? 'DELETED' : 'PROCESSED', replayed: r.replayed, path: 'direct',
+              version: r.items[0]?.version, queuePosition: 0, waitedMs: Date.now() - waitStart, workMs, ms: elapsed(started),
+              data: op === 'delete' ? undefined : r.rows[0] ?? (await this.cache.get(id)),
+            };
+          } catch (e) {
+            if (!(e instanceof WriteRejected && e.code === 'RECORD_BUSY')) throw e;
+            if (Date.now() - waitStart > MAX_WAIT_MS) throw new WriteRejected('QUEUE_TIMEOUT', String(id), `record busy for ${MAX_WAIT_MS} ms`);
+            await new Promise((res) => setTimeout(res, delay + Math.random() * delay));
+            delay = Math.min(delay * 2, 50);
+          }
+        }
+      }
       const out = await this.queue.run(
         id, opts.requestId, requestHash,
         async (ticket) => {
@@ -198,7 +221,7 @@ export class MuminService {
       );
       const r = out.result;
       return {
-        mode: 'redis-first', status: op === 'delete' ? 'DELETED' : 'PROCESSED', replayed: out.replayed || r.replayed,
+        mode: 'redis-first', status: op === 'delete' ? 'DELETED' : 'PROCESSED', replayed: out.replayed || r.replayed, path: 'line',
         version: r.items[0]?.version, queuePosition: out.position, waitedMs: out.waitedMs, workMs, ms: elapsed(started),
         data: op === 'delete' ? undefined : r.rows[0] ?? (await this.cache.get(id)),
       };
