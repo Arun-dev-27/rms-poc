@@ -51,6 +51,10 @@ export class SnapshotService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap() {
     await fs.mkdir(this.dir, { recursive: true });
+    // A snapshot interrupted by a crash leaves a .tmp file; it is never restored from, so just remove it.
+    for (const f of await fs.readdir(this.dir)) {
+      if (f.endsWith('.tmp')) await fs.unlink(path.join(this.dir, f)).catch(() => undefined);
+    }
     if (process.env.DISABLE_JOBS === '1') return; // one-time scripts drive everything themselves
     this.schedule('mumin-snapshot', this.config.get('SNAPSHOT_CRON', '*/15 * * * *'), () => this.takeSnapshot());
     this.schedule('mumin-reconcile', this.config.get('RECONCILE_CRON', '*/1 * * * *'), () => this.reconcile());
