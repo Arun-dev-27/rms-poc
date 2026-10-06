@@ -105,7 +105,7 @@ export class WriteBehindWorker implements OnApplicationBootstrap, OnModuleDestro
       latest.set(Number(f.id), { sid, row: f.op === 'delete' ? undefined : JSON.parse(f.row) });
     }
     const deletes = [...latest.entries()].filter(([, v]) => !v.row).map(([id]) => id);
-    if (deletes.length) await this.repo.deleteByIds(deletes); // transient errors throw -> retried
+    if (deletes.length) await this.repo.deleteByIds(deletes, true); // transient errors throw -> retried
     const rows = [...latest.values()].filter((v) => v.row).map((v) => v.row!);
     const rejected: number[] = [];
     try {

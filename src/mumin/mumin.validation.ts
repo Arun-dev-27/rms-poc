@@ -25,6 +25,7 @@ export function validatePatch(body: unknown, where = 'body'): MuminPatch {
       case 'numeric':
         if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequestException(`${where}: '${k}' must be an integer`);
         if (col.type === 'int' && (v < -2147483648 || v > 2147483647)) throw new BadRequestException(`${where}: '${k}' out of INT range`);
+        if (Math.abs(v) >= 1e14) throw new BadRequestException(`${where}: '${k}' must be below 100000000000000`);
         break;
       case 'bit':
         if (typeof v !== 'boolean') throw new BadRequestException(`${where}: '${k}' must be boolean`);
@@ -59,9 +60,9 @@ export function validateInsert(body: any, where = 'body') {
   return { [KEY_COLUMN]: id, ...patch } as MuminPatch & { Mumin_ID: number };
 }
 
-export function validateBatch<T>(body: any, field: string, each: (item: any, where: string) => T): T[] {
+export function validateBatch<T>(body: any, field: string, each: (item: any, where: string) => T, max = MAX_BATCH): T[] {
   const arr = body?.[field];
   if (!Array.isArray(arr) || arr.length === 0) throw new BadRequestException(`'${field}' must be a non-empty array`);
-  if (arr.length > MAX_BATCH) throw new BadRequestException(`'${field}' max ${MAX_BATCH} items per request`);
+  if (arr.length > max) throw new BadRequestException(`'${field}' max ${max} items per request`);
   return arr.map((item, i) => each(item, `${field}[${i}]`));
 }

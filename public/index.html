@@ -101,6 +101,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     <div class="stat"><div class="label">MSSQL rows</div><div class="value" id="sSql">—</div><div class="hint" id="sCt">change tracking —</div></div>
     <div class="stat"><div class="label">Redis vs MSSQL</div><div class="value" id="sSync">—</div><div class="hint" id="sSyncHint">&nbsp;</div></div>
     <div class="stat"><div class="label">Waiting for MSSQL</div><div class="value" id="sQueue">—</div><div class="hint" id="sQueueHint">queue / dirty / errors</div></div>
+    <div class="stat"><div class="label">Stopped records</div><div class="value" id="sStopped">—</div><div class="hint" id="sProc">processing now —</div></div>
     <div class="stat"><div class="label">Last full load</div><div class="value" id="sLoad">—</div><div class="hint" id="sLoadHint">&nbsp;</div></div>
   </section>
 
@@ -181,12 +182,21 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
           <span id="recMode" class="badge">—</span>
         </div>
         <div class="row">
+          <span id="recStatus" class="badge">—</span>
+          <button class="btn secondary" id="stopBtn" disabled>Stop</button>
+          <button class="btn secondary" id="resumeBtn" disabled>Resume</button>
           <button class="btn secondary" id="newFromBtn" disabled>Insert new (copy of this)</button>
           <button class="btn danger secondary" id="deleteBtn" disabled>Delete record</button>
           <button class="btn" id="saveBtn" disabled>Save changes</button>
         </div>
       </div>
       <div class="result" id="saveResult"></div>
+      <div class="row" style="margin-top:6px;padding:10px;border:1px dashed var(--border);border-radius:8px">
+        <span style="color:var(--muted);font-size:13px">2-phase processing test: start a slow request, press <b>Stop</b> while it runs, and it is refused at commit (423).</span>
+        <label>work <input id="workMs" type="number" value="5000" min="0" max="60000" style="width:90px"> ms</label>
+        <button class="btn small secondary" id="processBtn" disabled>Process</button>
+        <span id="processResult"></span>
+      </div>
       <div class="fields" id="fields"><div class="empty">Find a record to view and edit it.</div></div>
     </div>
   </section>
@@ -233,6 +243,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         <div class="result" id="bInsRes"></div>
       </div>
       <div class="card">
+        <h3>Stop / Resume records</h3>
+        <p class="desc">STOP: every later request for these records is refused with 423 (also requests already in progress). RESUME: allowed again.</p>
+        <div class="row"><button class="btn danger secondary" id="bStopBtn">Stop all</button><button class="btn secondary" id="bResumeBtn">Resume all</button></div>
+        <div class="result" id="bStopRes"></div>
+      </div>
+      <div class="card">
         <h3>Batch delete</h3>
         <p class="desc">Deletes every ID in the box from Redis now, and from MSSQL in the background.</p>
         <button class="btn danger" id="bDelBtn">Delete all</button>
@@ -270,14 +286,18 @@ const fmtMs = (ms) => (ms == null ? '—' : ms >= 1000 ? (ms / 1000).toFixed(2) 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let COLUMNS = [];
 let current = null;        // loaded record
+let currentVersion = 0;    // its version (sent as If-Match: refused if someone changed it meanwhile)
 let insertMode = false;
 let busy = false;
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 3500); }
 
-async function api(method, path, body) {
+async function api(method, path, body, extraHeaders = {}) {
   const t0 = performance.now();
-  const res = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const headers = { ...(body ? { 'content-type': 'application/json' } : {}), ...extraHeaders };
+  // Every write gets a unique request id: a retry/duplicate of it is applied only once.
+  if (method !== 'GET' && path.startsWith('/mumin') && path !== '/mumin/batch/get') headers['Idempotency-Key'] ??= 'ui-' + crypto.randomUUID();
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const total = performance.now() - t0;
   let data = null;
   try { data = await res.json(); } catch { /* empty */ }
@@ -336,6 +356,8 @@ async function refreshStatus() {
     if (diff === 0) { $('#sSync').innerHTML = '<span class="good">In sync</span>'; $('#sSyncHint').textContent = 'same row count'; }
     else { $('#sSync').innerHTML = `<span class="${pending ? 'warnc' : 'badc'}">${diff > 0 ? '+' : ''}${fmtN(diff)}</span>`; $('#sSyncHint').textContent = pending ? 'writes still on the way' : recs === 0 ? 'Redis is empty' : 'counts differ'; }
     $('#sQueue').innerHTML = `${fmtN(s.writeBehind.streamLength)} <span style="font-size:14px;color:var(--muted)">/ ${fmtN(pending)} / <span class="${s.writeBehind.dlq ? 'badc' : ''}">${fmtN(s.writeBehind.dlq)}</span></span>`;
+    $('#sStopped').innerHTML = s.writeBehind.stopped ? '<span class="warnc">' + fmtN(s.writeBehind.stopped) + '</span>' : '0';
+    $('#sProc').textContent = 'processing now: ' + fmtN(s.writeBehind.processing);
     const m = s.meta || {};
     $('#sLoad').textContent = m.loadMs ? fmtMs(+m.loadMs) : '—';
     $('#sLoadHint').textContent = m.source ? `from ${m.source === 'db' ? 'MSSQL' : m.source}${m.loadedAt ? ' · ' + new Date(m.loadedAt).toLocaleTimeString() : ''}` : 'no load info';
@@ -427,8 +449,17 @@ function inputFor(col, value) {
   const max = col.length > 0 ? `maxlength="${col.length}"` : '';
   return `<input data-col="${col.name}" type="${type}" ${max} value="${esc(v)}" placeholder="${col.nullable ? 'NULL' : 'required'}">`;
 }
-function renderRecord(rec, source, ms) {
-  current = rec; insertMode = false;
+function showStatus(status, version) {
+  const b = $('#recStatus');
+  b.className = 'badge ' + (status === 'STOPPED' ? 'warn' : status === 'PROCESSING' ? 'mssql' : 'ok');
+  b.textContent = (status || 'ACTIVE') + (version != null ? ' · v' + version : '');
+  $('#stopBtn').disabled = status === 'STOPPED';
+  $('#resumeBtn').disabled = status !== 'STOPPED';
+}
+function renderRecord(rec, source, ms, version, status) {
+  current = rec; insertMode = false; currentVersion = version ?? 0;
+  showStatus(status, version);
+  $('#processBtn').disabled = false;
   $('#recTitle').textContent = `Mumin_ID ${rec.Mumin_ID} · ${rec.Full_Name ?? ''}`;
   $('#recMode').className = 'badge ' + (source === 'redis' ? 'redis' : 'mssql');
   $('#recMode').textContent = `read from ${source === 'redis' ? 'Redis' : 'MSSQL'} in ${fmtMs(ms)}`;
@@ -464,7 +495,7 @@ async function find(id) {
   $('#findResult').innerHTML = '<span class="spin"></span>';
   try {
     const { data, total } = await api('GET', '/mumin/' + id);
-    renderRecord(data.data, data.source, data.ms);
+    renderRecord(data.data, data.source, data.ms, data.version, data.status);
     $('#findResult').innerHTML = '';
     log({ action: 'Single read', records: 1, server: data.ms, total, result: `Mumin_ID ${id} from ${data.source}` });
   } catch (e) {
@@ -491,13 +522,13 @@ $('#saveBtn').onclick = async () => {
       out.innerHTML = `<span class="badge ok">inserted in Redis</span> <span class="timing">${fmtMs(res.data.ms)}</span>`;
       log(entry); trackMssql(entry, out);
       const { data } = await api('GET', '/mumin/' + patch.Mumin_ID);
-      const keep = out.innerHTML; renderRecord(data.data, data.source, data.ms); out.innerHTML = keep;
+      const keep = out.innerHTML; renderRecord(data.data, data.source, data.ms, data.version, data.status); out.innerHTML = keep;
     } else {
-      res = await api('PATCH', '/mumin/' + current.Mumin_ID, patch);
+      res = await api('PATCH', '/mumin/' + current.Mumin_ID, patch, { 'If-Match': String(currentVersion) });
       const n = Object.keys(patch).length;
       const entry = { action: 'Single update', records: 1, server: res.data.ms, total: res.total, result: `${n} column(s): ${Object.keys(patch).join(', ')}` };
       log(entry);
-      renderRecord(res.data.data, 'redis', res.data.ms);
+      renderRecord(res.data.data, 'redis', res.data.ms, res.data.version, 'ACTIVE');
       $('#recMode').textContent = 'saved in Redis';
       out.innerHTML = `<span class="badge ok">saved in Redis</span> <span class="timing">${fmtMs(res.data.ms)}</span> · ${n} column(s)`;
       trackMssql(entry, out);
@@ -509,16 +540,55 @@ $('#deleteBtn').onclick = async () => {
   if (!current || !confirm(`Delete Mumin_ID ${current.Mumin_ID}? It is removed from Redis now and from MSSQL in the background.`)) return;
   const out = $('#saveResult');
   try {
-    const res = await api('DELETE', '/mumin/' + current.Mumin_ID);
+    const res = await api('DELETE', '/mumin/' + current.Mumin_ID, undefined, { 'If-Match': String(currentVersion) });
     const entry = { action: 'Single delete', records: 1, server: res.data.ms, total: res.total, result: `Mumin_ID ${current.Mumin_ID} deleted` };
     log(entry);
     $('#fields').innerHTML = '<div class="empty">Record deleted.</div>';
     $('#recTitle').textContent = `Mumin_ID ${current.Mumin_ID} (deleted)`;
     $('#recMode').textContent = 'deleted'; current = null;
-    ['#saveBtn', '#deleteBtn', '#newFromBtn'].forEach((s) => ($(s).disabled = true));
+    ['#saveBtn', '#deleteBtn', '#newFromBtn', '#stopBtn', '#resumeBtn', '#processBtn'].forEach((s) => ($(s).disabled = true));
     out.innerHTML = `<span class="badge ok">deleted from Redis</span> <span class="timing">${fmtMs(res.data.ms)}</span>`;
     trackMssql(entry, out); refreshStatus();
   } catch (e) { out.innerHTML = `<span class="badc">${esc(e.message)}</span>`; }
+};
+async function setRecordState(action) {
+  if (!current) return;
+  const out = $('#saveResult');
+  try {
+    const { data, total } = await api('POST', '/mumin/' + current.Mumin_ID + '/' + action, action === 'stop' ? { reason: 'stopped from UI' } : {});
+    const r = data.records[0];
+    const extra = action === 'stop' && r.inFlightRequest ? ' · a request was in flight: it will be refused at commit' : '';
+    out.innerHTML = '<span class="badge ' + (action === 'stop' ? 'warn' : 'ok') + '">' + data.status + '</span> <span class="timing">' + fmtMs(data.ms) + '</span> · was ' + r.previous + extra;
+    log({ action: action === 'stop' ? 'STOP record' : 'RESUME record', records: 1, server: data.ms, total, result: 'Mumin_ID ' + current.Mumin_ID + ': ' + r.previous + ' → ' + data.status + extra });
+    const st = (await api('GET', '/mumin/' + current.Mumin_ID + '/status')).data;
+    showStatus(st.status, st.version);
+  } catch (e) { out.innerHTML = '<span class="badc">' + esc(e.message) + '</span>'; }
+}
+$('#stopBtn').onclick = () => setRecordState('stop');
+$('#resumeBtn').onclick = () => setRecordState('resume');
+$('#processBtn').onclick = async () => {
+  if (!current) return;
+  const id = current.Mumin_ID;
+  const workMs = Math.max(0, +$('#workMs').value || 0);
+  const out = $('#processResult');
+  const t0 = performance.now();
+  const tick = setInterval(() => { out.innerHTML = '<span class="spin"></span>processing… ' + ((performance.now() - t0) / 1000).toFixed(1) + ' s'; }, 100);
+  setTimeout(async () => { try { const st = (await api('GET', '/mumin/' + id + '/status')).data; showStatus(st.status, st.version); } catch (e) { /* ignore */ } }, 150);
+  try {
+    const { data, total } = await api('POST', '/mumin/' + id + '/process', { workMs, patch: { Post: 'PROCESSED-' + new Date().toLocaleTimeString() } });
+    out.innerHTML = '<span class="badge ok">processed</span> <span class="timing">' + fmtMs(data.ms) + '</span> · v' + data.version;
+    log({ action: 'Process (2-phase)', records: 1, server: data.ms, total, result: 'Mumin_ID ' + id + ' processed (' + workMs + ' ms work)' });
+  } catch (e) {
+    out.innerHTML = '<span class="badc">' + e.status + ' · ' + esc(e.message) + '</span>';
+    log({ action: 'Process (2-phase)', records: 1, total: performance.now() - t0, result: e.status + ': ' + e.message, error: true });
+  } finally {
+    clearInterval(tick);
+    if (current && current.Mumin_ID === id) {
+      const { data } = await api('GET', '/mumin/' + id);
+      const keep = $('#saveResult').innerHTML; renderRecord(data.data, data.source, data.ms, data.version, data.status); $('#saveResult').innerHTML = keep;
+    }
+    refreshStatus();
+  }
 };
 $('#newFromBtn').onclick = () => {
   insertMode = true;
@@ -573,9 +643,9 @@ $('#bUpdBtn').onclick = () => batchRun($('#bUpdBtn'), $('#bUpdRes'), async () =>
   const col = COLUMNS.find((c) => c.name === $('#bCol').value);
   const value = parseValue(col, $('#bVal').value.trim());
   let server = 0, total = 0, updated = 0, notFound = 0;
-  for (const part of chunks(ids, 10000)) {
+  for (const part of chunks(ids, 1000)) {
     const { data, total: t } = await api('PATCH', '/mumin/batch', { items: part.map((Mumin_ID) => ({ Mumin_ID, [col.name]: value })) });
-    server += data.ms; total += t; updated += data.updated; notFound += data.notFound.length;
+    server += data.ms; total += t; updated += data.updated;
   }
   const out = $('#bUpdRes');
   const summary = `${fmtN(updated)} updated (${col.name} = ${JSON.stringify(value)})${notFound ? ` · ${fmtN(notFound)} not found` : ''}`;
@@ -591,10 +661,10 @@ $('#bInsBtn').onclick = () => batchRun($('#bInsBtn'), $('#bInsRes'), async () =>
   const tpl = (await api('GET', '/mumin/' + tplId)).data.data;
   const newIds = Array.from({ length: n }, (_, i) => start + i);
   let server = 0, total = 0, inserted = 0, conflicts = 0;
-  for (const part of chunks(newIds, 10000)) {
+  for (const part of chunks(newIds, 1000)) {
     const items = part.map((id) => ({ ...tpl, Mumin_ID: id, Person_ID: id, Full_Name: 'Test ' + id }));
     const { data, total: t } = await api('POST', '/mumin/batch', { items });
-    server += data.ms; total += t; inserted += data.inserted; conflicts += data.conflicts.length;
+    server += data.ms; total += t; inserted += data.inserted;
   }
   $('#ids').value = newIds.join(', '); updateIdCount();
   const out = $('#bInsRes');
@@ -604,15 +674,30 @@ $('#bInsBtn').onclick = () => batchRun($('#bInsBtn'), $('#bInsRes'), async () =>
   log(entry); await trackMssql(entry, out);
 });
 
+async function batchState(action) {
+  const ids = getIds();
+  if (!ids.length) return toast('Add some IDs first');
+  batchRun(action === 'stop' ? $('#bStopBtn') : $('#bResumeBtn'), $('#bStopRes'), async () => {
+    let server = 0, total = 0, n = 0;
+    for (const part of chunks(ids, 1000)) {
+      const { data, total: t } = await api('POST', '/mumin/batch/' + action, action === 'stop' ? { ids: part, reason: 'stopped from UI (batch)' } : { ids: part });
+      server += data.ms; total += t; n += data.records.length;
+    }
+    $('#bStopRes').innerHTML = '<span class="badge ' + (action === 'stop' ? 'warn' : 'ok') + '">' + (action === 'stop' ? 'STOPPED' : 'ACTIVE') + '</span> <span class="timing">' + fmtMs(server) + '</span> · ' + fmtN(n) + ' records';
+    log({ action: action === 'stop' ? 'Batch STOP' : 'Batch RESUME', records: n, server, total, result: fmtN(n) + ' records' });
+  });
+}
+$('#bStopBtn').onclick = () => batchState('stop');
+$('#bResumeBtn').onclick = () => batchState('resume');
 $('#bDelBtn').onclick = () => {
   const ids = getIds();
   if (!ids.length) return toast('Add some IDs first');
   if (!confirm(`Delete ${ids.length.toLocaleString()} records? Removed from Redis now and from MSSQL in the background.`)) return;
   batchRun($('#bDelBtn'), $('#bDelRes'), async () => {
     let server = 0, total = 0, deleted = 0, notFound = 0;
-    for (const part of chunks(ids, 10000)) {
+    for (const part of chunks(ids, 1000)) {
       const { data, total: t } = await api('POST', '/mumin/batch/delete', { ids: part });
-      server += data.ms; total += t; deleted += data.deleted; notFound += data.notFound;
+      server += data.ms; total += t; deleted += data.deleted;
     }
     const out = $('#bDelRes');
     const summary = `${fmtN(deleted)} deleted${notFound ? ` · ${fmtN(notFound)} not found` : ''}`;

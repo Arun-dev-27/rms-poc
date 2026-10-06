@@ -30,7 +30,7 @@ services:
     restart: "no"
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine   # 7.4+ needed: HEXPIRE (TTL per request id)
     container_name: rms-redis
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:

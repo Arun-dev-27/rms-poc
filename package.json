@@ -10,7 +10,9 @@
     "bench:db-to-redis": "node dist/cli/bench.js db-to-redis",
     "bench:snapshot-to-redis": "node dist/cli/bench.js snapshot-to-redis",
     "bench:writes": "node dist/cli/bench.js writes",
-    "gen:schema": "node scripts/gen-schema.js"
+    "gen:schema": "node scripts/gen-schema.js",
+    "loadtest": "node dist/cli/loadtest.js",
+    "stoptest": "node dist/cli/stoptest.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",

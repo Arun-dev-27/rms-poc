@@ -21,7 +21,7 @@ export class SnapshotController {
 
   @Get('sample-ids')
   sampleIds(@Query('n') n?: string) {
-    return this.snapshots.sampleIds(Math.min(Math.max(Number(n) || 100, 1), 10000));
+    return this.snapshots.sampleIds(Math.min(Math.max(Number(n) || 100, 1), 50000));
   }
 
   /** Delete ALL cached records from Redis. */

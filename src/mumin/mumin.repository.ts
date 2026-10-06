@@ -8,6 +8,12 @@ const q = (c: string) => `[${c}]`;
 const SELECT_COLS = ALL_COLUMNS.map((c) => `m.${q(c)}`).join(', ');
 const OUTPUT_COLS = ALL_COLUMNS.map((c) => `inserted.${q(c)}`).join(', ');
 const OPENJSON_WITH = COLUMNS.map((c) => `${q(c.name)} ${c.sql} '$.${c.name}'`).join(', ');
+/**
+ * Change-tracking context stamped on writes made by the write-behind worker. Reconcile skips these
+ * changes: they came FROM Redis, so re-applying them (and bumping versions) would be wrong.
+ */
+export const WRITE_BEHIND_CONTEXT = 'wb';
+const CT_CTX = `DECLARE @ctx VARBINARY(128) = CAST('${WRITE_BEHIND_CONTEXT}' AS VARBINARY(128));`;
 /** Rows per SQL statement inside a batch (keeps JSON parameter & lock footprint small). */
 const SQL_CHUNK = 1000;
 
@@ -141,8 +147,11 @@ export class MuminRepository {
       for (const part of chunk(rows, SQL_CHUNK)) {
         await new sql.Request(tx)
           .input('json', sql.NVarChar(sql.MAX), toSqlJson(part))
-          .query(`SELECT * INTO #j FROM OPENJSON(@json) WITH (${OPENJSON_WITH});
+          .query(`${CT_CTX}
+                  SELECT * INTO #j FROM OPENJSON(@json) WITH (${OPENJSON_WITH});
+                  WITH CHANGE_TRACKING_CONTEXT (@ctx)
                   UPDATE m SET ${set} FROM ${TABLE} m WITH (UPDLOCK) JOIN #j j ON j.${KEY_COLUMN} = m.${KEY_COLUMN};
+                  WITH CHANGE_TRACKING_CONTEXT (@ctx)
                   INSERT INTO ${TABLE} (${cols}) SELECT ${cols} FROM #j j
                     WHERE NOT EXISTS (SELECT 1 FROM ${TABLE} m WITH (UPDLOCK, HOLDLOCK) WHERE m.${KEY_COLUMN} = j.${KEY_COLUMN});
                   DROP TABLE #j;`);
@@ -150,13 +159,13 @@ export class MuminRepository {
     });
   }
 
-  async deleteByIds(ids: number[]): Promise<number> {
+  async deleteByIds(ids: number[], fromWriteBehind = false): Promise<number> {
     let n = 0;
     for (const part of chunk(ids, SQL_CHUNK)) {
       const r = await this.db.request()
         .input('ids', sql.NVarChar(sql.MAX), JSON.stringify(part))
-        .query(`DELETE FROM ${TABLE} WHERE ${KEY_COLUMN} IN (SELECT CAST([value] AS INT) FROM OPENJSON(@ids))`);
-      n += r.rowsAffected[0];
+        .query(`${fromWriteBehind ? `${CT_CTX} WITH CHANGE_TRACKING_CONTEXT (@ctx)` : ''} DELETE FROM ${TABLE} WHERE ${KEY_COLUMN} IN (SELECT CAST([value] AS INT) FROM OPENJSON(@ids))`);
+      n += r.rowsAffected[r.rowsAffected.length - 1];
     }
     return n;
   }
@@ -183,7 +192,8 @@ export class MuminRepository {
       req,
       `SELECT ct.SYS_CHANGE_OPERATION AS [__op], ct.${KEY_COLUMN} AS [__id], ${SELECT_COLS}
        FROM CHANGETABLE(CHANGES ${TABLE}, @v) ct
-       LEFT JOIN ${TABLE} m ON m.${KEY_COLUMN} = ct.${KEY_COLUMN}`,
+       LEFT JOIN ${TABLE} m ON m.${KEY_COLUMN} = ct.${KEY_COLUMN}
+       WHERE ct.SYS_CHANGE_CONTEXT IS NULL OR ct.SYS_CHANGE_CONTEXT <> CAST('${WRITE_BEHIND_CONTEXT}' AS VARBINARY(128))`,
       batchSize,
       async (rows: any[]) => {
         const b: ChangeBatch = { upserts: [], deletes: [] };

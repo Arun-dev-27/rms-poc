@@ -12,7 +12,7 @@ import { MssqlService } from '../database/mssql.service';
 import { TABLE } from '../mumin/mumin.columns';
 import { META_KEY, MuminCache } from '../mumin/mumin.cache';
 import * as sql from 'mssql';
-import { DIRTY_KEY, DLQ_KEY, MuminRedisWriter, STREAM_KEY } from '../mumin/mumin.redis-writer';
+import { DIRTY_KEY, DLQ_KEY, IDEM_KEY, MuminRedisWriter, PROC_KEY, STATUS_KEY, STOPINFO_KEY, STREAM_KEY, VERSION_KEY } from '../mumin/mumin.redis-writer';
 import { MuminRepository } from '../mumin/mumin.repository';
 import { ALL_COLUMNS, KEY_COLUMN, MuminRecord } from '../mumin/mumin.types';
 import { RedisService } from '../redis/redis.service';
@@ -153,12 +153,14 @@ export class SnapshotService implements OnApplicationBootstrap {
     const tmp = `${file}.tmp`;
     let count = 0;
     const cache = this.cache;
+    const stopped = await this.writer.stoppedAll(); // STOP status must survive Redis data loss too
     async function* lines() {
       yield JSON.stringify({ meta: { table: TABLE, takenAt, ctVersion, version: 1 } }) + '\n';
       for await (const batch of cache.scanAll()) {
         count += batch.length;
         yield batch.join('\n') + '\n';
       }
+      yield JSON.stringify({ state: { stopped } }) + '\n';
       yield JSON.stringify({ end: true, count }) + '\n'; // completeness marker
     }
     await pipeline(Readable.from(lines()), createGzip({ level: 6 }), createWriteStream(tmp));
@@ -189,6 +191,7 @@ export class SnapshotService implements OnApplicationBootstrap {
         const obj = JSON.parse(line);
         if (obj.meta) { meta = obj.meta; continue; }
         if (obj.end) { endCount = obj.count; continue; }
+        if (obj.state) { await this.writer.restoreStopped(obj.state.stopped ?? {}); continue; }
         buf.push(obj);
         if (buf.length >= this.cache.batchSize) { await this.cache.setMany(buf); rows += buf.length; buf = []; }
       }
@@ -235,6 +238,8 @@ export class SnapshotService implements OnApplicationBootstrap {
         await this.setClean(b.upserts);
         const dirty = await this.writer.dirtyOf(b.deletes);
         await this.cache.delMany(b.deletes.filter((id) => !dirty.has(id)));
+        // Changed outside the API: any version a client holds for these rows is now stale.
+        await this.writer.bumpVersions([...b.upserts.map((r) => r.Mumin_ID), ...b.deletes]);
         upserts += b.upserts.length;
         deletes += b.deletes.length;
       });
@@ -280,7 +285,7 @@ export class SnapshotService implements OnApplicationBootstrap {
     const pick = (k: string) => persistence.match(new RegExp(`${k}:(.*)`))?.[1]?.trim();
     const keys = await this.cache.countKeys();
     // dbsize minus the bookkeeping keys = exact record count, without scanning 264k keys
-    const bookkeeping = await this.redis.client.exists(META_KEY, STREAM_KEY, DLQ_KEY, DIRTY_KEY, LOCK_KEY);
+    const bookkeeping = await this.redis.client.exists(META_KEY, STREAM_KEY, DLQ_KEY, DIRTY_KEY, LOCK_KEY, VERSION_KEY, IDEM_KEY, STATUS_KEY, PROC_KEY, STOPINFO_KEY);
     return {
       redisKeys: keys,
       redisRecords: keys - bookkeeping,
