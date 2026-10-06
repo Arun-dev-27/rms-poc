@@ -5,6 +5,7 @@ import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './redis/redis.module';
 import { MuminModule } from './mumin/mumin.module';
 import { SnapshotModule } from './snapshot/snapshot.module';
+import { LoadTestModule } from './loadtest/loadtest.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { SnapshotModule } from './snapshot/snapshot.module';
     RedisModule,
     MuminModule,
     SnapshotModule,
+    LoadTestModule,
   ],
 })
 export class AppModule {}

@@ -79,6 +79,24 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .toast.show { opacity: 1; }
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .7s linear infinite; vertical-align: -1px; margin-right: 6px; }
 @keyframes s { to { transform: rotate(360deg); } }
+.bar { height: 10px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); font-variant-numeric: tabular-nums; }
+.chip.s200 { background: var(--ok-weak); color: var(--ok); } .chip.s423 { background: var(--warn-weak); color: var(--warn); }
+.chip.s409, .chip.s412 { background: var(--accent-weak); color: var(--accent); } .chip.serr { background: var(--bad-weak); color: var(--bad); }
+.phase { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-top: 12px; background: var(--panel); }
+.phase h4 { margin: 0; font-size: 14px; } .phase .sub { color: var(--muted); font-size: 12.5px; margin: 2px 0 10px; }
+.phase.pending { opacity: .55; }
+.nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 12px; }
+.nums div b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; } .nums div span { color: var(--muted); font-size: 12px; }
+.checks { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13px; }
+.checks li { padding: 4px 0; display: flex; gap: 8px; align-items: baseline; }
+.checks .ok { color: var(--ok); font-weight: 700; } .checks .no { color: var(--bad); font-weight: 700; }
+.banner { padding: 14px 16px; border-radius: 10px; font-weight: 650; font-size: 15px; margin-top: 12px; }
+.banner.pass { background: var(--ok-weak); color: var(--ok); } .banner.fail { background: var(--bad-weak); color: var(--bad); }
+.banner.run { background: var(--accent-weak); color: var(--accent); }
+pre.log { max-height: 320px; overflow: auto; font-size: 12px; background: var(--panel-2); padding: 10px; border-radius: 8px; white-space: pre-wrap; }
 @media (max-width: 640px) { main { padding: 14px 16px 40px; } header { padding: 12px 16px; } .stat .value { font-size: 19px; } }
 </style>
 </head>
@@ -109,6 +127,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     <button class="tab active" data-view="cache">Cache &amp; Snapshots</button>
     <button class="tab" data-view="single">Single record</button>
     <button class="tab" data-view="batch">Batch</button>
+    <button class="tab" data-view="load">1 lakh load test</button>
     <button class="tab" data-view="log">Timing log</button>
   </nav>
 
@@ -261,6 +280,27 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       <thead><tr><th>Mumin_ID</th><th>Full_Name</th><th>Jamaat</th><th>Mobile_No</th><th>Post</th><th>Gender</th><th class="num">Age</th></tr></thead>
       <tbody id="previewRows"><tr><td colspan="7" class="empty">Run a batch read to preview rows.</td></tr></tbody>
     </table></div></div>
+  </section>
+
+  <!-- ============ LOAD TEST ============ -->
+  <section class="view" id="view-load">
+    <div class="card">
+      <h3>Distributed 1 lakh request test</h3>
+      <p class="desc">Sends the requests to every running API instance at once, while records are STOPPED at random moments.
+        Checks: no request hangs, nothing is written to a stopped record after STOP, duplicates are applied once, races have one winner, and MSSQL = Redis at the end.
+        The test changes the <code>Post</code> column of ~12,000 records and restores the original values at the end.</p>
+      <div class="row">
+        <label>Requests <input id="ltReq" type="number" value="100000" min="1000" max="500000" step="1000" style="width:120px"></label>
+        <label>Concurrency <input id="ltConc" type="number" value="400" min="1" max="2000" style="width:90px"></label>
+        <button class="btn" id="ltStart">Start test</button>
+        <button class="btn danger secondary" id="ltCancel" disabled>Cancel</button>
+        <span id="ltStatus" class="badge">—</span>
+      </div>
+      <div class="result" id="ltInfo"></div>
+    </div>
+    <div id="ltBanner"></div>
+    <div id="ltPhases"></div>
+    <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">Raw test output</summary><pre class="log" id="ltLog"></pre></details>
   </section>
 
   <!-- ============ TIMING LOG ============ -->
@@ -707,11 +747,83 @@ $('#bDelBtn').onclick = () => {
   });
 };
 
+/* ---------- 1 lakh load test ---------- */
+const PHASES = [
+  ['D1', 'Cancellation + concurrency under load'],
+  ['D2', 'Same request on two instances at once'],
+  ['D3', 'Race: all instances update the same record'],
+  ['CLEANUP', 'Resume, MSSQL vs Redis, restore'],
+];
+function chipClass(k) { return k.startsWith('200') ? 's200' : k.startsWith('423') ? 's423' : k.startsWith('409') ? 's409' : k.startsWith('412') ? 's412' : 'serr'; }
+function renderLoadTest(st) {
+  const running = st.status === 'running';
+  $('#ltStart').disabled = running; $('#ltCancel').disabled = !running;
+  const cls = { running: 'mssql', passed: 'ok', failed: 'warn', cancelled: 'warn', error: 'warn', none: '' }[st.status] || '';
+  $('#ltStatus').className = 'badge ' + cls; $('#ltStatus').textContent = st.status === 'none' ? 'not run yet' : st.status;
+  if (st.status === 'none') { $('#ltInfo').textContent = 'No test has been run yet.'; return; }
+  const dur = ((Date.parse(st.finishedAt || new Date().toISOString()) - Date.parse(st.startedAt)) / 1000).toFixed(0);
+  $('#ltInfo').innerHTML = fmtN(st.requests) + ' requests · concurrency ' + st.concurrency + ' · instances: <b>' + st.instances.join(', ') + '</b> · started ' + new Date(st.startedAt).toLocaleTimeString() + ' · ' + dur + ' s';
+  const passed = st.checks.filter((c) => c.ok).length, failed = st.checks.length - passed;
+  $('#ltBanner').innerHTML = running ? '<div class="banner run"><span class="spin"></span>Running ' + esc(st.phase || '') + '… ' + passed + ' checks passed so far' + (failed ? ', ' + failed + ' failed' : '') + '</div>'
+    : st.status === 'passed' ? '<div class="banner pass">ALL ' + st.checks.length + ' CHECKS PASSED</div>'
+    : '<div class="banner fail">' + st.status.toUpperCase() + (st.error ? ': ' + esc(st.error) : '') + ' · ' + passed + ' passed, ' + failed + ' failed</div>';
+  $('#ltPhases').innerHTML = PHASES.map(([id, name]) => {
+    const p = st.phases[id];
+    const checks = st.checks.filter((c) => c.phase === id);
+    if (!p) return '<div class="phase pending"><h4>' + id + ' · ' + name + '</h4><div class="sub">waiting…</div></div>';
+    const pct = p.total ? Math.min(100, (100 * p.done) / p.total) : checks.length ? 100 : 0;
+    const rps = p.elapsedMs ? Math.round((p.done / p.elapsedMs) * 1000) : 0;
+    const m = p.metrics || {};
+    const lat = m['latency ms'];
+    const nums = p.total ? '<div class="nums">'
+      + '<div><b>' + fmtN(p.done) + ' / ' + fmtN(p.total) + '</b><span>requests done</span></div>'
+      + '<div><b>' + fmtN(rps) + '</b><span>requests / second</span></div>'
+      + '<div><b>' + (p.elapsedMs / 1000).toFixed(1) + ' s</b><span>elapsed</span></div>'
+      + (lat ? '<div><b>' + lat.p50 + ' / ' + lat.p95 + ' / ' + lat.p99 + '</b><span>latency ms p50 / p95 / p99</span></div>' : '')
+      + (m['records STOPPED during run'] ? '<div><b>' + String(m['records STOPPED during run']).split(' ')[0] + '</b><span>records stopped</span></div>' : '')
+      + (m['requests IN FLIGHT when their record was STOPPED'] ? '<div><b>' + String(m['requests IN FLIGHT when their record was STOPPED']).split(' ')[0] + '</b><span>stopped mid-processing</span></div>' : '')
+      + '</div>' : '';
+    const chips = Object.entries(p.statuses || {}).sort().map(([k, v]) => '<span class="chip ' + chipClass(k) + '">' + esc(k) + ': ' + fmtN(v) + '</span>').join('');
+    const inst = Object.entries(p.perInstance || {}).sort().map(([k, v]) => '<span class="chip">' + esc(k) + ': ' + fmtN(v) + '</span>').join('');
+    const extra = Object.entries(m).filter(([k]) => !['latency ms', 'requests per instance', 'responses', 'time / throughput', 'records STOPPED during run', 'requests IN FLIGHT when their record was STOPPED'].includes(k))
+      .map(([k, v]) => '<li><span style="color:var(--muted)">' + esc(k) + ':</span> ' + esc(typeof v === 'object' ? JSON.stringify(v) : v) + '</li>').join('');
+    return '<div class="phase"><h4>' + id + ' · ' + name + '</h4><div class="sub">' + esc(p.title) + '</div>'
+      + (p.total ? '<div class="bar"><div style="width:' + pct.toFixed(1) + '%"></div></div>' : '')
+      + nums + (chips ? '<div class="chips">' + chips + '</div>' : '') + (inst ? '<div class="chips" title="requests per instance">' + inst + '</div>' : '')
+      + (checks.length || extra ? '<ul class="checks">' + checks.map((c) => '<li><span class="' + (c.ok ? 'ok' : 'no') + '">' + (c.ok ? '✓ PASS' : '✗ FAIL') + '</span>' + esc(c.label) + '</li>').join('') + extra + '</ul>' : '')
+      + '</div>';
+  }).join('');
+  const log = $('#ltLog'); const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = (st.log || []).join('\n'); if (atBottom) log.scrollTop = log.scrollHeight;
+}
+let ltTimer = null;
+async function pollLoadTest() {
+  try {
+    const { data } = await api('GET', '/loadtest/status');
+    renderLoadTest(data);
+    clearTimeout(ltTimer);
+    ltTimer = setTimeout(pollLoadTest, data.status === 'running' ? 700 : 5000);
+  } catch (e) { clearTimeout(ltTimer); ltTimer = setTimeout(pollLoadTest, 3000); }
+}
+$('#ltStart').onclick = async () => {
+  if (!confirm('Start the load test? It sends ' + fmtN(+$('#ltReq').value) + ' requests to all running instances (takes about a minute or two).')) return;
+  try {
+    await api('POST', '/loadtest/start', { requests: +$('#ltReq').value, concurrency: +$('#ltConc').value });
+    log({ action: 'Load test started', records: +$('#ltReq').value, result: 'see the 1 lakh load test tab' });
+    pollLoadTest();
+  } catch (e) { toast(e.message); }
+};
+$('#ltCancel').onclick = async () => { if (confirm('Cancel the running test? (original values may not be restored)')) await api('POST', '/loadtest/cancel'); };
+
 /* ---------- tabs, theme, init ---------- */
-document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => {
+function showTab(view) {
+  const t = document.querySelector('.tab[data-view="' + view + '"]');
+  if (!t) return;
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-  document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + t.dataset.view));
-}));
+  document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + view));
+}
+document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => { showTab(t.dataset.view); history.replaceState(null, '', '#' + t.dataset.view); }));
+if (location.hash) showTab(location.hash.slice(1)); // e.g. /#load opens the load test tab
 $('#themeBtn').onclick = () => {
   const root = document.documentElement;
   const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
@@ -727,6 +839,7 @@ try { const t = localStorage.getItem('theme'); if (t) document.documentElement.d
       .map((c) => `<option value="${c.name}" ${c.name === 'Post' ? 'selected' : ''}>${c.name} (${c.sql.toLowerCase()})</option>`).join('');
   } catch { toast('Could not load columns: is the API running?'); }
   refreshStatus();
+  pollLoadTest();
 })();
 </script>
 </body>

@@ -49,11 +49,39 @@ function call(node: number, method: string, path: string, body?: unknown, header
 
 let completed = 0;
 let firstError = '';
+
+/** Live progress for the UI: the API starts this script with PROGRESS_JSON=1 and reads "@@{json}" lines. */
+const PROGRESS = process.env.PROGRESS_JSON === '1';
+let phase = '';
+let phaseTotal = 0;
+let phaseStart = performance.now();
+let live: { statuses: Record<string, number>; perInstance: Record<string, number> } = { statuses: {}, perInstance: {} };
+function emit(event: Record<string, unknown>) { if (PROGRESS) process.stdout.write('@@' + JSON.stringify(event) + '\n'); }
+function flushProgress() {
+  if (phase) emit({ type: 'progress', phase, done: completed, total: phaseTotal, elapsedMs: Math.round(performance.now() - phaseStart), ...live });
+}
+function startPhase(id: string, title: string, total: number) {
+  flushProgress(); // final numbers of the phase that just ended
+  phase = id; phaseTotal = total; phaseStart = performance.now(); completed = 0;
+  live = { statuses: {}, perInstance: {} };
+  console.log(`\n=== ${id}  ${title} ===`);
+  emit({ type: 'phase', phase: id, title, total });
+}
+function track(r: Res | Res[]) {
+  for (const x of Array.isArray(r) ? r : [r]) {
+    const k = statusKey(x);
+    live.statuses[k] = (live.statuses[k] ?? 0) + 1;
+    live.perInstance[x.instance] = (live.perInstance[x.instance] ?? 0) + 1;
+  }
+}
+const progressTimer = setInterval(() => {
+  if (phase) emit({ type: 'progress', phase, done: completed, total: phaseTotal, elapsedMs: Math.round(performance.now() - phaseStart), ...live });
+}, 500);
 async function pool<T>(n: number, task: (i: number) => Promise<T>): Promise<T[]> {
   const out: T[] = new Array(n);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, n) }, async () => {
-    while (next < n) { const i = next++; out[i] = await task(i); completed++; }
+    while (next < n) { const i = next++; out[i] = await task(i); track(out[i] as any); completed++; }
   }));
   return out;
 }
@@ -67,9 +95,9 @@ function latency(rs: Res[]) {
 }
 function count<T>(rs: T[], key: (r: T) => string) { const m: Record<string, number> = {}; for (const r of rs) { const k = key(r); m[k] = (m[k] ?? 0) + 1; } return m; }
 const statusKey = (r: Res) => String(r.status) + (r.body?.error ? ` ${r.body.error}` : r.body?.replayed ? ' replayed' : '');
-const line = (label: string, v: unknown) => console.log(`${label.padEnd(56)} ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+const line = (label: string, v: unknown) => { console.log(`${label.padEnd(56)} ${typeof v === 'object' ? JSON.stringify(v) : v}`); emit({ type: 'metric', phase, label, value: v }); };
 let pass = true;
-const check = (label: string, ok: boolean) => { if (!ok) pass = false; line(label, ok ? 'PASS' : 'FAIL'); };
+const check = (label: string, ok: boolean) => { if (!ok) pass = false; console.log(`${label.padEnd(56)} ${ok ? 'PASS' : 'FAIL'}`); emit({ type: 'check', phase, label, ok }); };
 
 async function batchGet(ids: number[]) {
   const versions = new Map<number, number>();
@@ -111,7 +139,7 @@ async function main() {
     console.error('TEST ABORTED:', e);
   } finally {
     if (firstError) line('first network error seen', firstError);
-    console.log('\n=== cleanup: resume, MSSQL vs Redis, restore originals ===');
+    startPhase('CLEANUP', 'resume stopped records, compare MSSQL with Redis, restore original values', 0);
     const stopped = (await call(0, 'GET', '/cache/queue')).body.stopped;
     for (let i = 0; i < all.length; i += 1000) await call(i / 1000, 'POST', '/mumin/batch/resume', { ids: all.slice(i, i + 1000) });
     line('stopped records resumed', stopped);
@@ -128,17 +156,19 @@ async function main() {
     line('original values restored', restore.length);
   }
   console.log(`\nRESULT: ${pass ? 'ALL CHECKS PASSED' : 'SOME CHECKS FAILED'}`);
+  clearInterval(progressTimer);
+  flushProgress();
+  emit({ type: 'end', pass });
   agents.forEach((a) => a.destroy());
   process.exit(pass ? 0 : 1);
 }
 
 // ------------------------------------------------------------------ D1
 async function d1(ids: number[]) {
-  console.log(`=== D1  ${TOTAL.toLocaleString()} requests (60% /process 0-30 ms work, 40% update) + 1,000 STOPs, spread over ${PORTS.length} instances ===`);
+  startPhase('D1', `${TOTAL.toLocaleString()} requests (60% /process, 40% update) + 1,000 STOPs over ${PORTS.length} instance(s)`, TOTAL);
   const { versions: v0 } = await batchGet(ids);
   const toStop = shuffle(ids).slice(0, 1000);
   const stops = new Map<number, { versionAtStop: number; inFlight: string | null; instance: string }>();
-  completed = 0;
   const t0 = performance.now();
   let done = false;
   const canceller = (async () => {
@@ -199,14 +229,14 @@ async function d1(ids: number[]) {
 // ------------------------------------------------------------------ D2
 async function d2(ids: number[]) {
   const N = 10000;
-  console.log(`\n=== D2  ${N.toLocaleString()} updates + 2,000 /process, each sent to TWO instances at the same moment (same request id) ===`);
+  startPhase('D2', `${(N + 2000).toLocaleString()} requests, each sent to two instances at the same moment (same request id)`, N + 2000);
   // The 1,000 records stopped in D1 are still stopped: both copies of those requests must get 423.
   const { versions: v0 } = await batchGet(ids);
   const pairs = await pool(N + 2000, async (i) => {
     const id = ids[i % ids.length];
     const key = `d2-${i}-${randomUUID()}`;
     const a = rnd(PORTS.length);
-    const b = (a + 1 + rnd(PORTS.length - 1)) % PORTS.length; // a different instance
+    const b = PORTS.length > 1 ? (a + 1 + rnd(PORTS.length - 1)) % PORTS.length : a; // a different instance when possible
     const send = (node: number) => i < N
       ? call(node, 'PATCH', `/mumin/${id}`, { Post: `D2-${i}` }, { 'Idempotency-Key': key })
       : call(node, 'POST', `/mumin/${id}/process`, { workMs: 10, patch: { Post: `D2P-${i}` } }, { 'Idempotency-Key': key });
@@ -229,7 +259,7 @@ async function d2(ids: number[]) {
 
 // ------------------------------------------------------------------ D3
 async function d3(raceIds: number[]) {
-  console.log(`\n=== D3  ${raceIds.length} records x ${PORTS.length} clients (one per instance) racing with the same If-Match ===`);
+  startPhase('D3', `${raceIds.length} records x ${PORTS.length} clients racing with the same If-Match`, raceIds.length);
   const { versions: v0 } = await batchGet(raceIds);
   const groups = await pool(raceIds.length, async (i) => {
     const id = raceIds[i];
@@ -260,4 +290,4 @@ async function compareWithMssql(redisRows: Map<number, any>): Promise<number> {
   return mismatch + (redisRows.size - r.recordset.length);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => { console.error(e); emit({ type: 'end', pass: false, error: String(e) }); process.exit(1); });
