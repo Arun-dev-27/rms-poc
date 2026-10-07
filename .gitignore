@@ -5,3 +5,8 @@ snapshots/*
 !snapshots/.gitkeep
 app.log
 logs/
+
+# Documents and images (not pushed)
+RMS_Redis_Report.md
+RMS_Redis_Report.pdf
+docs/
