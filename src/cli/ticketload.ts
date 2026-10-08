@@ -19,6 +19,7 @@ interface Params {
   total: number; concurrency: number; its: number; sameIdPct: number; maxQty: number;
   tickets: number; adminFreeze: number; unfreezeAt: number; rounds: number; payPct: number;
   zoneFreezeAt: number; zoneUnfreezeAt: number; cancelDuringFreeze: number;
+  zone?: string; resetFirst?: boolean; // real mode: an existing zone with its real availability
 }
 const P: Params = {
   total: 100000, concurrency: 400, its: 20000, sameIdPct: 30, maxQty: 4,
@@ -28,7 +29,8 @@ const P: Params = {
 };
 const NODES = (process.env.NODE_URLS ?? 'http://localhost:3100').split(',').map((u) => new URL(u));
 const RUN = process.env.TL_RUN ?? Date.now().toString(36);
-const ZONE = 'load-test-zone-1';
+const REAL = !!P.zone;
+const ZONE = P.zone || 'load-test-zone-1';
 const TIMEOUT_MS = 60000;
 const agents = NODES.map(() => new http.Agent({ keepAlive: true, maxSockets: Math.ceil(P.concurrency / NODES.length) + 50 }));
 for (const s of [process.stdout, process.stderr]) s.on('error', () => undefined);
@@ -73,13 +75,25 @@ async function main() {
 
   // ---------------- P0 setup
   emit({ type: 'phase', phase: 'P0', title: 'Setup: test zone, real ITS ids, admin freeze' });
-  await must(req(0, 'POST', '/tickets/zones', { city: 'Load Test', name: 'Zone 1', show: 'Load test', total: P.tickets, holdSeconds: 3600 }), 'create zone');
-  await must(req(0, 'POST', `/tickets/zones/${ZONE}/reset`), 'reset zone');
-  await must(req(0, 'PATCH', `/tickets/zones/${ZONE}`, { total: P.tickets, holdSeconds: 3600 }), 'set zone');
+  const cfg = await must(req(0, 'GET', '/tickets/config'), 'config');
+  const DIRECT = cfg.business.confirmMode === 'direct'; // a free seat is confirmed at once (no hold, nothing to pay)
+  P.maxQty = Math.max(1, Math.min(P.maxQty, cfg.business.maxPerIts)); // seats per ITS id from the business configuration
+  if (REAL) {
+    // real availability: the zone is used as it is configured (seats, freeze time); only its old requests are cleared
+    if (P.resetFirst !== false) await must(req(0, 'POST', `/tickets/zones/${ZONE}/reset`), 'reset zone');
+  } else {
+    await must(req(0, 'POST', '/tickets/zones', { city: 'Load Test', name: 'Zone 1', show: 'Load test', total: P.tickets, holdSeconds: 3600 }), 'create zone');
+    await must(req(0, 'POST', `/tickets/zones/${ZONE}/reset`), 'reset zone');
+    await must(req(0, 'PATCH', `/tickets/zones/${ZONE}`, { total: P.tickets, holdSeconds: 3600 }), 'set zone');
+  }
+  const start = await must(req(0, 'GET', `/tickets/zones/${ZONE}`), 'zone');
+  P.tickets = start.total;
+  if (P.adminFreeze > start.available) P.adminFreeze = 0; // cannot block more than is free
+  const seatsForUsers = start.available - P.adminFreeze;
   const itsIds: number[] = await must(req(0, 'GET', `/tickets/its-sample?n=${P.its}`), 'ITS sample');
   let adminRid = '';
   if (P.adminFreeze > 0) adminRid = (await must(req(1 % NODES.length, 'POST', `/tickets/zones/${ZONE}/freeze`, { qty: P.adminFreeze, reason: 'load test: blocked until unfreeze under load' }), 'admin freeze')).request.rid;
-  emit({ type: 'metric', phase: 'P0', label: 'setup', value: { its: itsIds.length, tickets: P.tickets, adminFrozen: P.adminFreeze, freezeTimeS: 3600 } });
+  emit({ type: 'metric', phase: 'P0', label: 'setup', value: { its: itsIds.length, tickets: P.tickets, available: start.available, adminFrozen: P.adminFreeze, freezeTimeS: start.holdMs / 1000, zone: ZONE, real: REAL, city: start.city, name: start.name, maxPerIts: P.maxQty } });
 
   // ---------------- P1 booking storm
   emit({ type: 'phase', phase: 'P1', title: `${P.total.toLocaleString('en-IN')} booking requests over ${NODES.length} node(s)`, total: P.total });
@@ -88,12 +102,13 @@ async function main() {
   itsIds.forEach((id, i) => perIts.set(id, base + (i < extra ? 1 : 0)));
   const groups = itsIds.filter((id) => perIts.get(id)! > 0);
   const statuses: Record<string, number> = {};
-  const outcomes: Record<string, number> = { FROZEN: 0, WAITING: 0, DUP_REQUEST_ID: 0, DUP_ITS: 0, OTHER: 0 };
+  const outcomes: Record<string, number> = { FROZEN: 0, WAITING: 0, PAUSED: 0, NO_SEATS: 0, DUP_REQUEST_ID: 0, DUP_ITS: 0, OTHER: 0 };
   const perNode = NODES.map(() => 0);
   const accepted = new Map<number, number>();
+  const seats = new Map<number, number>(); // confirmed / held answers per ITS id
   const lat: number[] = [];
   const errors: string[] = [];
-  let done = 0, next = 0, rr = 0, unfrozen: any = null;
+  let done = 0, next = 0, rr = 0, unfrozen: any = null, heldQty = 0;
   const heldRids: string[] = [];
   // zone freeze under load: okAt = freeze confirmed, offAt = unfreeze sent
   const zf: any = { on: false, okAt: 0, offAt: 0, answeredWhileFrozen: 0, frozenWhileFrozen: 0, cancels: 0, cancelsMoved: 0, payStatus: 0, payCode: '', unfreeze: null };
@@ -118,13 +133,15 @@ async function main() {
       const insideFreeze = zf.okAt && sentAt > zf.okAt && (!zf.offAt || answeredAt < zf.offAt);
       for (const a of answers) {
         if (insideFreeze) { zf.answeredWhileFrozen++; if (a.status === 200 && a.body?.outcome === 'FROZEN') zf.frozenWhileFrozen++; }
-        if (a.status === 200 && a.body?.outcome === 'FROZEN' && heldRids.length < 5000) heldRids.push(a.body.request.rid);
+        if (a.status === 200 && (a.body?.outcome === 'FROZEN' || a.body?.outcome === 'BOOKED')) { heldQty += a.body.request.qty; if (heldRids.length < 5000) heldRids.push(a.body.request.rid); }
         done++;
         perNode[a.node]++;
         lat.push(a.ms);
         statuses[a.status] = (statuses[a.status] ?? 0) + 1;
-        if (a.status === 200 && a.body?.outcome === 'FROZEN') { outcomes.FROZEN++; accepted.set(its, (accepted.get(its) ?? 0) + 1); }
-        else if (a.status === 202) { outcomes.WAITING++; accepted.set(its, (accepted.get(its) ?? 0) + 1); }
+        if (a.status === 200 && (a.body?.outcome === 'FROZEN' || a.body?.outcome === 'BOOKED')) { outcomes.FROZEN++; accepted.set(its, (accepted.get(its) ?? 0) + 1); seats.set(its, (seats.get(its) ?? 0) + 1); }
+        else if (a.status === 202) { outcomes[a.body?.outcome === 'PAUSED' ? 'PAUSED' : 'WAITING']++; accepted.set(its, (accepted.get(its) ?? 0) + 1); }
+        else if (a.status === 409 && a.body?.outcome === 'NO_SEATS') outcomes.NO_SEATS++;
+        else if (a.status === 423 && a.body?.outcome === 'ZONE_FROZEN') outcomes.PAUSED++; // answered Frozen, nothing kept
         else if (a.status === 409 && a.body?.code === 'REQUEST_ID_ALREADY_USED') outcomes.DUP_REQUEST_ID++;
         else if (a.status === 409 && a.body?.code === 'ITS_HAS_OPEN_REQUEST') outcomes.DUP_ITS++;
         else { outcomes.OTHER++; if (errors.length < 20) errors.push(`${a.status} ${JSON.stringify(a.body).slice(0, 160)}`); }
@@ -135,9 +152,11 @@ async function main() {
         const fr = await req(3 % NODES.length, 'POST', `/tickets/zones/${ZONE}/zone-freeze`, { reason: 'load test: zone frozen under load' });
         zf.freezeStatus = fr.status; zf.atFreeze = fr.body?.freeze?.atFreeze; zf.okAt = performance.now(); zf.freezeNode = NODES[fr.node].host;
         // while frozen: cancel held requests -> their tickets must NOT go to anyone yet
-        for (const rid of heldRids.splice(0, P.cancelDuringFreeze)) {
-          const c = await req(zf.cancels++ % NODES.length, 'POST', `/tickets/zones/${ZONE}/requests/${rid}/release`, { reason: 'load test: cancelled while the zone is frozen' });
-          if (c.status === 200) zf.cancelsMoved += c.body?.movedFromLine ?? 0;
+        // 20 at a time, so the freeze lasts about as long as planned even under load
+        const toCancel = heldRids.splice(0, P.cancelDuringFreeze);
+        for (let i = 0; i < toCancel.length; i += 20) {
+          const res = await Promise.all(toCancel.slice(i, i + 20).map((rid) => req(zf.cancels++ % NODES.length, 'POST', `/tickets/zones/${ZONE}/requests/${rid}/release`, { reason: 'load test: cancelled while the zone is frozen' })));
+          for (const c of res) if (c.status === 200) zf.cancelsMoved += c.body?.movedFromLine ?? 0;
         }
         // while frozen: paying must be refused
         const payRid = heldRids.shift();
@@ -151,11 +170,12 @@ async function main() {
         zf.offAt = performance.now();
         const ur = await req(4 % NODES.length, 'POST', `/tickets/zones/${ZONE}/zone-unfreeze`);
         zf.on = false;
-        zf.unfreeze = { status: ur.status, movedFromLine: ur.body?.movedFromLine ?? 0, timersResumed: ur.body?.freeze?.timersResumed ?? 0, node: NODES[ur.node].host };
+        zf.unfreeze = { status: ur.status, movedFromLine: ur.body?.movedFromLine ?? 0, timersResumed: ur.body?.freeze?.timersResumed ?? 0, dropped: ur.body?.freeze?.droppedRequests ?? 0, node: NODES[ur.node].host };
         emit({ type: 'metric', phase: 'P1', label: 'zoneFreeze', value: { ...zf } });
       }
       // admin unfreezes under load, once, from a different node
-      if (adminRid && !unfrozen && done >= (P.total * P.unfreezeAt) / 100) {
+      // while the zone is frozen nobody may get tickets, so the admin unfreeze waits for the zone unfreeze
+      if (adminRid && !unfrozen && done >= (P.total * P.unfreezeAt) / 100 && (!P.zoneFreezeAt || zf.unfreeze)) {
         unfrozen = { at: done };
         const r = await req(2 % NODES.length, 'POST', `/tickets/zones/${ZONE}/requests/${adminRid}/release`, { reason: 'load test: unfreeze under load' });
         unfrozen = { at: done, status: r.status, movedFromLine: r.body?.movedFromLine ?? 0, node: NODES[r.node].host };
@@ -181,7 +201,7 @@ async function main() {
   const rounds: any[] = [];
   for (let i = 0; i < P.rounds; i++) {
     const r = await req(i % NODES.length, 'POST', `/tickets/zones/${ZONE}/settle`, { payPct: P.payPct });
-    rounds.push({ round: i + 1, node: NODES[r.node].host, status: r.status, processed: r.body?.processed, booked: r.body?.booked, released: r.body?.released, movedFromLine: r.body?.movedFromLine, ms: Math.round(r.ms) });
+    rounds.push({ round: i + 1, node: NODES[r.node].host, status: r.status, processed: r.body?.processed, booked: r.body?.booked, released: r.body?.released, movedFromLine: r.body?.movedFromLine, zoneFrozen: !!r.body?.after?.zoneFrozen, ms: Math.round(r.ms) });
     emit({ type: 'progress', phase: 'P2', done: i + 1, total: P.rounds, rounds });
   }
 
@@ -191,19 +211,45 @@ async function main() {
   const zone = await must(req(0, 'GET', `/tickets/zones/${ZONE}`), 'zone');
   const acc = [...accepted.values()];
   const exactlyOne = itsIds.filter((id) => accepted.get(id) === 1).length;
+  const dups = outcomes.DUP_REQUEST_ID + outcomes.DUP_ITS;
+  const accTotal = acc.reduce((a, n) => a + n, 0);
   const checks = [
     { label: `all ${P.total.toLocaleString('en-IN')} requests answered (no timeout / network error / 5xx)`, ok: done === P.total && !Object.keys(statuses).some((s) => Number(s) < 0 || Number(s) >= 500) },
-    { label: `exactly ONE accepted request per ITS id (${exactlyOne.toLocaleString('en-IN')} / ${itsIds.length.toLocaleString('en-IN')})`, ok: exactlyOne === itsIds.length && acc.every((n) => n === 1) },
-    { label: `every other request answered DUPLICATE (${(outcomes.DUP_REQUEST_ID + outcomes.DUP_ITS).toLocaleString('en-IN')})`, ok: outcomes.DUP_REQUEST_ID + outcomes.DUP_ITS === P.total - itsIds.length && outcomes.OTHER === 0 },
-    { label: `server counted the same: ${afterP1.requests} requests (incl. 1 admin freeze), ${afterP1.duplicates} duplicates`, ok: afterP1.requests === itsIds.length + (adminRid ? 1 : 0) && afterP1.duplicates === P.total - itsIds.length },
-    { label: `admin unfreeze under load served the waiting line (${unfrozen?.movedFromLine ?? 0} requests)`, ok: !adminRid || (unfrozen?.status === 200 && unfrozen.movedFromLine > 0) },
+    ...(DIRECT ? [
+      // direct mode: no waiting line. An ITS id gets a seat (or Frozen while the zone is frozen) once at most;
+      // when the seats are gone each of its requests is answered NO SEATS and it is not registered
+      // a Frozen request dropped at the unfreeze frees its ITS id, so that ITS id may register once more
+      { label: `at most ONE seat per ITS id (${seats.size.toLocaleString('en-IN')} ITS ids got a seat, none twice)`, ok: [...seats.values()].every((n) => n <= 1) },
+      { label: `no waiting line: ${outcomes.WAITING} waiting (must be 0), ${outcomes.NO_SEATS.toLocaleString('en-IN')} answered NO SEATS AVAILABLE`, ok: outcomes.WAITING === 0 && outcomes.OTHER === 0 },
+      { label: `server counted the same: ${afterP1.requests} requests (${accTotal} booked + ${outcomes.NO_SEATS} no seats + ${outcomes.PAUSED} frozen${adminRid ? ' + 1 admin freeze' : ''}), ${afterP1.duplicates} duplicates (${dups})`,
+        ok: afterP1.requests === accTotal + outcomes.NO_SEATS + outcomes.PAUSED + (adminRid ? 1 : 0) && afterP1.duplicates === dups },
+    ] : [
+      { label: `exactly ONE accepted request per ITS id (${exactlyOne.toLocaleString('en-IN')} / ${itsIds.length.toLocaleString('en-IN')})`, ok: exactlyOne === itsIds.length && acc.every((n) => n === 1) },
+      { label: `every other request answered DUPLICATE (${dups.toLocaleString('en-IN')})`, ok: dups === P.total - itsIds.length && outcomes.OTHER === 0 },
+      { label: `server counted the same: ${afterP1.requests} requests${adminRid ? ' (incl. 1 admin freeze)' : ''}, ${afterP1.duplicates} duplicates`, ok: afterP1.requests === itsIds.length + (adminRid ? 1 : 0) && afterP1.duplicates === P.total - itsIds.length },
+    ]),
+    ...(adminRid ? [{ label: `admin unfreeze under load served the waiting line (${unfrozen?.movedFromLine ?? 0} requests)`, ok: unfrozen?.status === 200 && unfrozen.movedFromLine > 0 }] : []),
     ...(P.zoneFreezeAt ? [
       { label: `zone freeze under load: ${zf.answeredWhileFrozen.toLocaleString('en-IN')} bookings answered while frozen, ${zf.frozenWhileFrozen} got tickets (must be 0)`, ok: zf.freezeStatus === 200 && zf.answeredWhileFrozen > 0 && zf.frozenWhileFrozen === 0 },
       { label: `while frozen: ${zf.cancels} held requests cancelled → ${zf.cancelsMoved} waiting requests got their tickets (must be 0)`, ok: zf.cancels > 0 && zf.cancelsMoved === 0 },
-      { label: `while frozen: paying a held request refused (HTTP ${zf.payStatus} ${zf.payCode})`, ok: zf.payStatus === 423 && zf.payCode === 'ZONE_FROZEN' },
-      { label: `zone unfreeze: ${zf.unfreeze?.timersResumed ?? 0} held timers resumed, ${zf.unfreeze?.movedFromLine ?? 0} waiting requests got tickets in order`, ok: zf.unfreeze?.status === 200 && zf.unfreeze.movedFromLine > 0 },
+      // (direct mode: nothing is held, so there is no payment to refuse)
+      ...(DIRECT ? [] : [{ label: `while frozen: paying a held request refused (HTTP ${zf.payStatus} ${zf.payCode})`, ok: zf.payStatus === 423 && zf.payCode === 'ZONE_FROZEN' }]),
+      DIRECT
+        ? { label: `zone unfreeze: ${outcomes.PAUSED} requests were answered Frozen and nothing was kept, so the unfreeze booked ${zf.unfreeze?.movedFromLine ?? 0} (must be 0); only new requests are booked`, ok: zf.unfreeze?.status === 200 && (zf.unfreeze.dropped ?? 0) === 0 && zf.unfreeze.movedFromLine === 0 }
+        : { label: `zone unfreeze: ${zf.unfreeze?.timersResumed ?? 0} held timers resumed, ${zf.unfreeze?.movedFromLine ?? 0} waiting requests got tickets in order`, ok: zf.unfreeze?.status === 200 && zf.unfreeze.movedFromLine > 0 },
     ] : []),
-    { label: 'line moved in every round (freed tickets → waiting requests)', ok: rounds.every((r) => r.status === 200) && (zone.waiting === 0 || rounds.some((r) => r.movedFromLine > 0)) },
+    // while the zone is frozen, freed seats correctly go to nobody until the unfreeze
+    DIRECT ? { label: `cancel rounds done (${rounds.map((r) => r.released ?? 0).join(' + ')} confirmed seats cancelled → available again, no waiting line)`, ok: rounds.every((r) => r.status === 200) } :
+    { label: `line moved whenever seats were freed (cancelled seats → next waiting requests, in order)${rounds.some((r) => r.zoneFrozen) ? ' · zone was frozen in some rounds: seats wait for the unfreeze' : ''}`,
+      ok: rounds.every((r) => r.status === 200 && (!r.released || r.movedFromLine > 0 || zone.waiting === 0 || r.zoneFrozen)) },
+    ...(REAL && DIRECT ? [{
+      label: `seats confirmed = at most the seats available (${heldQty} of ${seatsForUsers}${zf.cancels ? ` + ${zf.cancels} cancelled during the freeze and given again` : ''}); after that every new request got NO SEATS`,
+      ok: heldQty <= seatsForUsers + (zf.cancels ?? 0) && (heldQty < seatsForUsers || outcomes.NO_SEATS > 0),
+    }] : []),
+    ...(REAL && !DIRECT && !P.zoneFreezeAt ? [{
+      label: `seats given at once = seats available at the start (${heldQty} of ${seatsForUsers}); everyone else waits in FIFO order or is a duplicate`,
+      ok: heldQty <= seatsForUsers && (P.maxQty > 1 || heldQty === Math.min(seatsForUsers, itsIds.length)),
+    }] : []),
     ...verify.checks.map((c: any) => ({ label: `${c.name} (${c.detail})`, ok: c.ok })),
     { label: `every node took load (${NODES.map((u, i) => `${u.port}: ${perNode[i]}`).join(', ')})`, ok: perNode.every((n) => n > 0) },
   ];

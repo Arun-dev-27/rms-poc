@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raza Registration</title>
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --panel-2: #f0f2f5; --text: #1b1f24; --muted: #5d6673; --border: #dde1e6;
+  --accent: #2457d6; --accent-weak: #e6edfc; --ok: #1a7f4b; --ok-weak: #e3f4ea; --warn: #9a6200; --warn-weak: #fdf1dc;
+  --bad: #c0362c; --bad-weak: #fbe6e4; --frz: #6a3fc8; --frz-weak: #efe8fc; --ice: #1d4f8a; --ice-weak: #e8f1fb;
+  --term-bg: #0f1419; --term-fg: #d6dde6; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #191d23; --panel-2: #20252c; --text: #e6e9ed; --muted: #98a2ae; --border: #2c333c;
+    --accent: #7aa2ff; --accent-weak: #1d2a47; --ok: #4cc38a; --ok-weak: #15301f; --warn: #e0a640; --warn-weak: #33270f;
+    --bad: #f07167; --bad-weak: #3a1a17; --frz: #b69bff; --frz-weak: #2a2140; --ice: #9cc4f2; --ice-weak: #13253b; --term-bg: #0a0d11;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #191d23; --panel-2: #20252c; --text: #e6e9ed; --muted: #98a2ae; --border: #2c333c;
+  --accent: #7aa2ff; --accent-weak: #1d2a47; --ok: #4cc38a; --ok-weak: #15301f; --warn: #e0a640; --warn-weak: #33270f;
+  --bad: #f07167; --bad-weak: #3a1a17; --frz: #b69bff; --frz-weak: #2a2140; --ice: #9cc4f2; --ice-weak: #13253b; --term-bg: #0a0d11;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 14px; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 19px; }
+header .sub { color: var(--muted); font-size: 13px; }
+header .right { margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+main { max-width: 1400px; margin: 0 auto; padding: 18px 24px 60px; display: grid; gap: 18px; }
+@media (max-width: 700px) { main { padding: 12px 16px 40px; } header { padding: 10px 16px; } }
+section.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; min-width: 0; }
+section.card > h2 { margin: 0 0 4px; font-size: 17px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+section.card > h2 .n { color: var(--accent); }
+.desc { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 18px; }
+@media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+.row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+label.f { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+input, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; min-width: 0; }
+input:focus, select:focus { outline: 2px solid var(--accent-weak); border-color: var(--accent); }
+input.num { width: 90px; } input.wide { width: 260px; }
+button.btn { font: inherit; font-weight: 600; border-radius: 8px; padding: 7px 13px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap; }
+button.btn.secondary { background: var(--panel); color: var(--accent); }
+button.btn.danger { background: var(--bad); border-color: var(--bad); }
+button.btn.danger.secondary { background: var(--panel); color: var(--bad); }
+button.btn.small { padding: 3px 9px; font-size: 12.5px; }
+button.btn:disabled { opacity: .45; cursor: not-allowed; }
+.out { margin-top: 8px; font-size: 13px; min-height: 18px; }
+.table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 9px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); position: sticky; top: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.st { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+.st.open { background: var(--ok-weak); color: var(--ok); } .st.frozen { background: var(--ice-weak); color: var(--ice); }
+.st.held { background: var(--frz-weak); color: var(--frz); } .st.waiting { background: var(--warn-weak); color: var(--warn); }
+.st.confirmed { background: var(--ok-weak); color: var(--ok); } .st.bad { background: var(--bad-weak); color: var(--bad); }
+.good { color: var(--ok); } .badc { color: var(--bad); } .warnc { color: var(--warn); } .frzc { color: var(--frz); } .muted { color: var(--muted); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
+.kv div:nth-child(odd) { color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip { font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); font-variant-numeric: tabular-nums; }
+.chip.f { background: var(--frz-weak); color: var(--frz); } .chip.w { background: var(--warn-weak); color: var(--warn); }
+.chip.o { background: var(--ok-weak); color: var(--ok); } .chip.d { background: var(--bad-weak); color: var(--bad); }
+.node { display: inline-flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 9px; padding: 5px 9px; margin: 0 6px 6px 0; font-size: 12.5px; }
+.node b { font-variant-numeric: tabular-nums; }
+.line-list { max-height: 330px; overflow: auto; }
+.term { background: var(--term-bg); color: var(--term-fg); border-radius: 10px; padding: 10px 12px; font: 12.5px/1.55 var(--mono); height: 560px; overflow: auto; white-space: pre; }
+.term .h { color: #7f8b99; } .term .t { color: #7f8b99; } .term .id { color: #5f6b78; } .term .z { color: #9fb3c8; }
+.term .its { color: #ffffff; font-weight: 700; } .term .k { color: #56b6c2; } .term .cnt { color: #7f8b99; }
+.term .FROZEN, .term .NO_TICKETS_LEFT { color: #c678dd; } .term .WAITING { color: #e5c07b; } .term .BOOKED { color: #98c379; }
+.term .DUPLICATE_BLOCKED, .term .EXPIRED, .term .BOOKING_CANCELLED { color: #e06c75; } .term .RELEASED, .term .CANCELLED { color: #61afef; }
+.term .REQ { color: #61afef; } .term .DUP { color: #e06c75; font-weight: 700; } .term .DUPHEAD { color: #e06c75; } .term .AV { color: #e5c07b; font-weight: 700; } .term .AUTO { color: #d19a66; font-weight: 700; } .term .OK { color: #98c379; } .term .ERROR { color: #e06c75; } .term .RES { color: #98c379; } .term .RESBAD { color: #e06c75; }
+.term .EDITED, .term .ZONE_FROZEN, .term .ZONE_UNFROZEN, .term .ZONE_UPDATED, .term .ZONE_RESET, .term .ZONE_CREATED { color: #56b6c2; }
+.bar { height: 14px; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin: 8px 0; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.banner { padding: 10px 14px; border-radius: 9px; font-weight: 650; margin: 8px 0; }
+.banner.pass { background: var(--ok-weak); color: var(--ok); } .banner.fail { background: var(--bad-weak); color: var(--bad); } .banner.run { background: var(--accent-weak); color: var(--accent); }
+ul.checks { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; }
+ul.checks li { padding: 3px 0; } ul.checks .ok { color: var(--ok); font-weight: 700; } ul.checks .no { color: var(--bad); font-weight: 700; }
+.toast { position: fixed; right: 20px; bottom: 20px; background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; max-width: 460px; }
+.toast.show { opacity: 1; }
+.rules { display: grid; gap: 4px; font-size: 13px; }
+@keyframes flash { 0% { background: #ffe066; } 100% { background: transparent; } }
+@keyframes flashDark { 0% { background: #6b5a12; } 100% { background: transparent; } }
+.chg, tr.chg > td { animation: flash 5s ease-out; }
+:root[data-theme="dark"] .chg, :root[data-theme="dark"] tr.chg > td { animation-name: flashDark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chg, :root:not([data-theme="light"]) tr.chg > td { animation-name: flashDark; } }
+tr.hot > td { background: #fff3bf; transition: background .4s; }
+:root[data-theme="dark"] tr.hot > td { background: #4a3f12; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) tr.hot > td { background: #4a3f12; } }
+tr.sel > td { box-shadow: inset 0 0 0 9999px var(--accent-weak); }
+input.edited { border-color: var(--warn); background: var(--warn-weak); }
+td.lastchg { white-space: normal; min-width: 230px; font-size: 12.5px; }
+.vok { color: var(--ok); font-weight: 650; } .vbad { color: var(--bad); font-weight: 650; }
+.act { border: 1px solid var(--border); border-radius: 9px; margin-bottom: 6px; background: var(--panel); }
+.act > summary { list-style: none; cursor: pointer; padding: 7px 10px; display: grid; grid-template-columns: 100px 150px minmax(0, 1.2fr) 70px minmax(0, 2fr); gap: 10px; align-items: baseline; font-size: 13px; }
+.act > summary::-webkit-details-marker { display: none; }
+.act[open] > summary { border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.act .t { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.act .path { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act .code { font-weight: 700; } .act .code.ok { color: var(--ok); } .act .code.no { color: var(--bad); }
+.act .res { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act .body { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px; }
+.act pre { margin: 0; background: var(--panel-2); border-radius: 7px; padding: 8px; font: 12px/1.45 var(--mono); max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.act .lbl { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .05em; margin-bottom: 4px; }
+.act .verify { grid-column: 1 / -1; font-size: 13px; }
+@media (max-width: 800px) { .act > summary { grid-template-columns: 1fr; } .act .body { grid-template-columns: 1fr; } }
+.dlrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.dlrow .lbl { font-size: 12.5px; color: var(--muted); }
+.guide th, .guide td { white-space: normal; vertical-align: top; }
+.guide td:first-child { white-space: nowrap; }
+.guide code { font-size: 12px; }
+.zfnote { display: none; margin-top: 8px; padding: 9px 12px; border-radius: 9px; background: var(--ice-weak); color: var(--ice); font-size: 13px; }
+.zfnote.on { display: block; }
+.flow { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
+.flow li { margin: 3px 0; }
+[title] { cursor: help; }
+.rules b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="hName">Raza Registration</h1>
+    <div class="sub">Multiple cities and zones · one registration per ITS id · confirmed in request order · freeze · cancel</div>
+  </div>
+  <div class="right">
+    <span id="hNodes">nodes —</span>
+    <a id="termLink" href="http://localhost:3300" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-weight:600">Terminal log ↗ (port 3300)</a>
+    <a href="/" style="color:var(--accent);text-decoration:none">Mumin console →</a>
+    <button class="btn small danger secondary" id="clearAll">Clear all data</button>
+    <button class="btn small secondary" id="themeBtn">Theme</button>
+  </div>
+</header>
+
+<main>
+  <!-- ================= 1 · BUSINESS UNIT CONFIGURATION ================= -->
+  <section class="card">
+    <h2><span class="n">1</span> Business unit configuration</h2>
+    <p class="desc">Type a new <b>Total seats</b> and press <b>Update</b>; the page reads the zone back from Redis and shows ✓ verified or ✗ in <b>Last change</b>. Anything that changes flashes yellow. Freeze a whole <b>city</b> (all its zones in one step) or a single <b>zone</b>: new requests there are answered Frozen until unfrozen.</p>
+    <div class="row">
+      <label class="f">Programme name<input id="cName" class="wide"></label>
+      <label class="f">Seats per ITS id<input id="cMax" type="number" min="1" max="10" class="num"></label>
+      <button class="btn" id="cSave">Save</button>
+      <span class="out" id="cOut" style="margin:0 0 6px"></span>
+    </div>
+    <div class="sub-h" style="margin-top:14px;font-weight:650">Cities <span class="muted" style="font-weight:400;font-size:12.5px">· freeze / unfreeze every zone of a city in one step</span></div>
+    <div class="table-wrap" style="margin-top:6px">
+      <table>
+        <thead><tr><th>City</th><th class="num">Zones</th><th>Status</th><th class="num">Total seats</th><th class="num">Available</th><th class="num">Confirmed</th><th></th></tr></thead>
+        <tbody id="cRows"></tbody>
+      </table>
+    </div>
+    <div class="sub-h" style="margin-top:14px;font-weight:650">Zones <span class="muted" style="font-weight:400;font-size:12.5px">· freeze / unfreeze one zone, change its seats</span></div>
+    <div class="table-wrap" style="margin-top:6px">
+      <table>
+        <thead><tr><th>City</th><th>Zone</th><th>Status</th><th title="Type a new number and press Update (or Enter)">Total seats ✎</th><th class="num">Available</th><th class="num">Confirmed</th><th>Last change</th><th></th></tr></thead>
+        <tbody id="zRows"></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="f">New city<input id="nCity" placeholder="Mumbai"></label>
+      <label class="f">New zone<input id="nZone" placeholder="Saifee"></label>
+      <label class="f">Seats<input id="nSeats" type="number" min="1" value="100" class="num"></label>
+      <button class="btn secondary" id="nAdd">Add city / zone</button>
+      <span class="out" id="nOut" style="margin:0 0 6px"></span>
+    </div>
+    <div class="dlrow"><span class="lbl">Download:</span><button class="btn small secondary" data-dl="summary">⬇ All zones summary (CSV)</button></div>
+  </section>
+
+  <!-- ================= LAST ACTIONS ================= -->
+  <section class="card">
+    <h2><span class="n">✓</span> Last actions · request and response</h2>
+    <p class="desc">Everything you do on this page: what was sent, what came back, and whether the change is really in Redis. Newest first; click one to see the full request and response.</p>
+    <div id="actList"><div class="muted" style="font-size:13px">No actions yet.</div></div>
+  </section>
+
+  <!-- ================= 2 · TECH CONFIGURATION ================= -->
+  <section class="card">
+    <h2><span class="n">2</span> Tech configuration</h2>
+    <div class="two">
+      <div>
+        <div class="kv" id="techKv"></div>
+        <div class="row" style="margin-top:12px">
+          <label class="f">Terminal lines (min 100)<input id="tLines" type="number" min="100" max="1000" class="num"></label>
+          <button class="btn secondary" id="tSave">Save</button>
+          <span class="out" id="tOut" style="margin:0 0 6px"></span>
+        </div>
+        <div class="rules" id="rules" style="margin-top:12px"></div>
+      </div>
+      <div>
+        <div class="desc" style="margin-bottom:6px">Live nodes (API instances). Each one heartbeats into Redis; every node serves every zone.</div>
+        <div id="nodes"></div>
+        <div class="row" style="margin-top:6px">
+          <label class="f">Add nodes<input id="ndCount" type="number" min="1" max="8" value="2" class="num"></label>
+          <button class="btn secondary" id="ndAdd">+ Add nodes</button>
+          <span class="out" id="ndOut" style="margin:0 0 6px"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 3 · REGISTER + FIFO LINE ================= -->
+  <section class="card">
+    <h2><span class="n">3</span> Register and the FIFO line</h2>
+    <div class="two">
+      <div>
+        <p class="desc">One registration per ITS id per zone. If a seat is free the registration is <b>confirmed at once</b>, in request order. When every seat is confirmed the answer is <b>No seats available</b> (not registered). Cancel makes the seat available again.</p>
+        <div class="row">
+          <label class="f">ITS id<input id="rIts" inputmode="numeric" class="num" style="width:120px"></label>
+          <label class="f">City<select id="rCity"></select></label>
+          <label class="f">Zone<select id="rZone"></select></label>
+        </div>
+        <div class="muted" id="rWho" style="font-size:12.5px;margin-top:4px">&nbsp;</div>
+        <div class="row" style="margin-top:6px">
+          <label class="f">Request id<input id="rRid" class="wide"></label>
+          <button class="btn secondary small" id="rNew" style="margin-bottom:4px">New id</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="rGo">Register</button>
+          <button class="btn secondary" id="rRandom">Random ITS id</button>
+        </div>
+        <div class="out" id="rOut"></div>
+      </div>
+      <div>
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <b id="lTitle">Zone</b><span class="muted" id="lMeta"></span>
+        </div>
+        <div class="dlrow" style="margin-top:6px"><span class="lbl">Download:</span><button class="btn small secondary" data-dl="zone">⬇ Zone report: every registration (CSV)</button></div>
+        <div class="zfnote" id="lFrozen"></div>
+        <div class="line-list table-wrap" style="margin-top:8px">
+          <table>
+            <thead><tr><th class="num" title="Arrival order in this zone (1 = first request since the last reset). Never changes.">Order #</th><th class="num" title="Current place in the FIFO waiting line (only for Waiting).">Line place</th><th>ITS id</th><th>Name</th><th>Request id</th><th>Status</th><th></th></tr></thead>
+            <tbody id="lRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 4 · LOAD TEST ON REAL AVAILABILITY ================= -->
+  <section class="card">
+    <h2><span class="n">4</span> Load test on real availability</h2>
+    <p class="desc">Runs on the zone you pick, with its real seats (e.g. 1 seat and 1 lakh requests), over every live node. Old requests of that zone are cleared first; its seats stay as configured.</p>
+    <div class="row">
+      <label class="f">Zone<select id="ltZone"></select></label>
+      <button class="btn secondary" id="ltFreeze" title="Freeze or unfreeze this zone (also while the load test runs)">❄ Freeze zone</button>
+      <span id="ltZoneSt" style="margin-bottom:6px"></span>
+      <label class="f">Seats<input id="ltSeats" type="number" value="100" min="1" class="num" style="width:80px"></label>
+      <button class="btn secondary" id="ltSeatsDown" title="Reduce seats (only free seats can be removed)">− Reduce</button>
+      <button class="btn secondary" id="ltSeatsUp" title="Add seats">+ Increase</button>
+      <label class="f">Requests<input id="ltTotal" type="number" value="100000" class="num" style="width:110px"></label>
+      <button class="btn" id="ltStart">Start load test</button>
+      <button class="btn danger secondary" id="ltCancel">Cancel</button>
+    </div>
+    <div class="muted" id="ltHint" style="font-size:12.5px;margin-top:6px"></div>
+    <div class="dlrow"><span class="lbl">Download:</span><button class="btn small secondary" data-dl="load">⬇ Last load test result (CSV)</button></div>
+    <div id="ltOut"></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dash = (v) => (v === undefined || v === null || v === '' || Number.isNaN(v) ? '—' : esc(v));
+const fmtN = (n) => Number(n ?? 0).toLocaleString('en-IN');
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+const tm = (ms) => { if (!ms) return '—'; const d = new Date(+ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; };
+const dur = (ms) => ms == null ? '—' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} m ${Math.round(ms % 60000 / 1000)} s`;
+const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2800); };
+const newRid = () => 'reg-' + (crypto.randomUUID ? crypto.randomUUID().slice(0, 13) : Math.random().toString(36).slice(2, 15));
+const ACTS = [];
+const ACT_LABEL = [
+  [/^PATCH \/tickets\/zones\/[^/]+$/, 'Update zone'], [/zone-freeze$/, 'Freeze zone'], [/zone-unfreeze$/, 'Unfreeze zone'], [/\/reset$/, 'Reset zone'],
+  [/^POST \/tickets\/zones$/, 'Add zone'], [/\/book$/, 'Register'], [/\/confirm$/, 'Confirm'], [/\/release$/, 'Cancel'], [/\/tickets\/config$/, 'Save configuration'],
+  [/nodes\/start$/, 'Add nodes'], [/\/stop$/, 'Stop node'], [/loadtest\/start$/, 'Start load test'], [/loadtest\/cancel$/, 'Cancel load test'], [/clear-all$/, 'Clear all data'],
+];
+async function api(method, path, body, headers = {}) {
+  const t0 = performance.now();
+  const res = await fetch(path, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined });
+  let data = null; try { data = await res.json(); } catch {}
+  const out = { status: res.status, data };
+  if (method !== 'GET') {
+    const key = `${method} ${path.split('?')[0]}`;
+    out.act = { at: Date.now(), method, path, body, headers, status: res.status, data, ms: Math.round(performance.now() - t0), label: (ACT_LABEL.find(([re]) => re.test(key)) || [, method])[1] };
+    ACTS.unshift(out.act); if (ACTS.length > 25) ACTS.pop();
+    renderActs();
+  }
+  return out;
+}
+function actSummary(a) {
+  const d = a.data || {};
+  if (a.status >= 400) return `<span class="vbad">${esc(ERRS[String(d.code ?? '').split(':')[0]] || d.code || (Array.isArray(d.message) ? d.message.join(', ') : d.message) || 'failed')}</span>`;
+  if (d.changes) return esc(d.changes) + (d.movedFromLine ? ` · ${d.movedFromLine} moved up from the line` : '');
+  if (d.outcome) return esc(d.outcome) + (d.request ? ` · ITS ${esc(d.request.user)} · ${esc(d.request.rid)}${d.request.position ? ` · place ${d.request.position}` : ''}` : '') + (d.movedFromLine ? ` · ${d.movedFromLine} moved up from the line` : '');
+  if (d.request?.status) return esc((WORD[d.request.status] || [d.request.status])[0]) + (d.movedFromLine ? ` · ${d.movedFromLine} moved up from the line` : '');
+  if (d.freeze) return d.freeze.endedAt ? `unfrozen · ${d.movedFromLine ?? 0} waiting got seats` : 'zone frozen';
+  if (d.removedRequests !== undefined) return `${fmtN(d.removedRequests)} registrations removed`;
+  return 'done';
+}
+function renderActs() {
+  const box = $('#actList'); if (!box) return;
+  const open = new Set([...box.querySelectorAll('details[open]')].map((x) => x.dataset.at));
+  const j = (v) => esc(JSON.stringify(v, null, 2) ?? '').slice(0, 2500);
+  box.innerHTML = ACTS.length ? ACTS.map((a, i) => `<details class="act" data-at="${a.at}" ${open.has(String(a.at)) ? 'open' : ''}>
+      <summary class="${i === 0 && Date.now() - a.at < 6000 ? 'chg' : ''}"><span class="t">${tm(a.at)}</span><b>${esc(a.label)}</b><span class="path">${esc(a.method)} ${esc(a.path)}</span>
+        <span class="code ${a.status < 400 ? 'ok' : 'no'}">${a.status}</span><span class="res">${actSummary(a)}${a.verify ? ` · ${a.verify}` : ''}</span></summary>
+      <div class="body">
+        <div><div class="lbl">REQUEST</div><pre>${esc(a.method)} ${esc(a.path)}${a.headers?.['Idempotency-Key'] ? `\nIdempotency-Key: ${esc(a.headers['Idempotency-Key'])}` : ''}\n\n${a.body ? j(a.body) : '(no body)'}</pre></div>
+        <div><div class="lbl">RESPONSE · HTTP ${a.status} · ${a.ms} ms</div><pre>${j(a.data)}</pre></div>
+        ${a.verify ? `<div class="verify"><b>Check:</b> ${a.verify}</div>` : ''}
+      </div></details>`).join('') : '<div class="muted" style="font-size:13px">No actions yet.</div>';
+}
+const ERRS = {
+  ITS_NOT_FOUND: 'This ITS id is not in Mumin_Mast.', ITS_CANCELLED: 'This ITS id is cancelled in Mumin_Mast.',
+  TOTAL_BELOW_USED: 'Cannot go lower: those seats are held or confirmed.', ZONE_FROZEN: 'The zone is frozen: confirm and more seats wait until it is unfrozen.',
+  ALREADY_FROZEN: 'The zone is already frozen.', CITY_NOT_FOUND: 'No zones found for this city.', ZONE_NOT_FROZEN: 'The zone is not frozen.', MORE_THAN_TOTAL: 'More seats than the zone has.',
+  FREEZE_EXPIRED: 'The hold had already run out; the seat went to the next person.', NOT_FROZEN: 'This registration is not on hold any more.',
+};
+const errText = (d) => { const code = String(d?.code ?? ''); const m = ERRS[code] || ERRS[code.split(':')[0]] || (Array.isArray(d?.message) ? d.message.join(', ') : d?.message) || code || 'Not done'; return `<span class="badc"><b>Not done</b> · ${esc(m)}</span>`; };
+// [label, css class, meaning, what happens next, terminal word]
+const STATUS = {
+  FROZEN: ['Held', 'held', 'A seat is reserved for this ITS id.', 'Confirm → Confirmed. Cancel → the seat goes to #1 in the line.', 'HELD'],
+  PAUSED: ['Frozen', 'frozen', 'Came while the zone was frozen. Not confirmed.', 'When the zone is unfrozen it is dropped (not processed) and the ITS id is free to register again. Only requests after the unfreeze are processed, in request order.', 'FROZEN'],
+  ZONE_FROZEN: ['Frozen', 'frozen', 'Came while the zone was frozen. Not booked and not kept for later.', 'Finished. After the unfreeze, a new request is booked if a seat is free.', 'FROZEN'],
+  NO_SEATS: ['No seats available', 'bad', 'All seats were already confirmed when this request came. Not registered, no waiting line.', 'Finished. The ITS id can try again if a confirmed seat is cancelled.', 'NO SEATS'],
+  DROPPED: ['Dropped', 'bad', 'Came while the zone was frozen; the zone was then unfrozen.', 'Finished, not processed. The ITS id can register again.', 'DROPPED'],
+  WAITING: ['Waiting', 'waiting', 'No seat for this request yet (zone full, others ahead, or zone frozen). It has a place in the FIFO line.', 'Gets a seat when one is freed and everyone ahead has been served. Can cancel (leave the line).', 'WAITING'],
+  BOOKED: ['Confirmed', 'confirmed', 'The registration is final; the seat belongs to this ITS id.', 'Stays until cancelled; a cancelled seat goes to #1 in the line.', 'CONFIRMED'],
+  RELEASED: ['Cancelled', 'bad', 'A held seat was given up (cancelled by the person or the admin).', 'Finished. The seat went to the next person in line.', 'RELEASED'],
+  EXPIRED: ['Expired', 'bad', 'The seat was held but not confirmed in time.', 'Finished. The seat went to the next person in line. The ITS id can register again.', 'EXPIRED'],
+  CANCELLED: ['Left line', 'bad', 'Left the waiting line before getting a seat.', 'Finished. Everyone behind moves up one place.', 'LEFT_LINE'],
+  BOOKING_CANCELLED: ['Confirmation cancelled', 'bad', 'A confirmed registration was cancelled.', 'Finished. The seat went to the next person in line.', 'BOOKING_CANCELLED'],
+  DUPLICATE_BLOCKED: ['Duplicate', 'bad', 'Same request id sent again, or this ITS id already has an open registration in this zone.', 'Not processed. The original registration is unchanged (HTTP 409).', 'DUPLICATE'],
+};
+const ZONE_STATUS = {
+  open: ['Open', 'open', 'Registrations run normally: a free seat is held at once when nobody is waiting; otherwise the request joins the FIFO line.'],
+  frozen: ['❄ Frozen', 'frozen', 'Everything except confirmed is frozen: nobody gets a seat, new requests join the line. Unfreeze confirms the line in order.'],
+};
+const WORD = Object.fromEntries(Object.entries(STATUS).map(([k, v]) => [k, [v[0], v[1]]]));
+const st = (s) => STATUS[s] ? `<span class="st ${STATUS[s][1]}" title="${esc(STATUS[s][2] + ' ' + STATUS[s][3])}">${esc(STATUS[s][0])}</span>` : `<span class="st">${esc(s)}</span>`;
+const CITY_ST = { OPEN: ['Open', 'open', 'Every zone of the city is open'], FROZEN: ['Frozen', 'frozen', 'Every zone of the city is frozen: new requests are answered Frozen'], PARTLY_FROZEN: ['Partly frozen', 'waiting', 'Some zones of the city are frozen'] };
+const cityId = (c) => c.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+function renderCities() {
+  const by = new Map();
+  for (const z of zones) {
+    const id = cityId(z.city), c = by.get(id) || { id, city: z.city, zones: 0, frozen: 0, total: 0, available: 0, booked: 0 };
+    c.zones++; c.total += z.total; c.available += z.available; c.booked += z.booked; if (z.zoneFrozen) c.frozen++;
+    by.set(id, c);
+  }
+  const html = [...by.values()].map((c) => {
+    const st = c.frozen === 0 ? 'OPEN' : c.frozen === c.zones ? 'FROZEN' : 'PARTLY_FROZEN', w = CITY_ST[st];
+    return `<tr data-city="${esc(c.id)}"><td><b>${esc(c.city)}</b></td><td class="num">${c.zones}${c.frozen && c.frozen < c.zones ? ` <span class="muted">(${c.frozen} frozen)</span>` : ''}</td>`
+      + `<td><span class="st ${w[1]}" title="${esc(w[2])}">${esc(w[0])}</span></td><td class="num">${fmtN(c.total)}</td><td class="num"><b class="good">${fmtN(c.available)}</b></td><td class="num">${fmtN(c.booked)}</td>`
+      + `<td style="white-space:nowrap">${c.frozen < c.zones ? `<button class="btn small secondary" data-cact="freeze">❄ Freeze city</button>` : ''} ${c.frozen > 0 ? `<button class="btn small" data-cact="unfreeze">▶ Unfreeze city</button>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted">No cities yet</td></tr>';
+  if ($('#cRows').dataset.sig !== html) { $('#cRows').innerHTML = html; $('#cRows').dataset.sig = html; }
+}
+$('#cRows').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-cact]'); if (!b) return;
+  const id = b.closest('tr').dataset.city, kind = b.dataset.cact;
+  b.disabled = true;
+  try {
+    const r = await api('POST', `/tickets/cities/${encodeURIComponent(id)}/${kind}`, kind === 'freeze' ? { reason: 'city frozen from the registration page' } : undefined);
+    const c = r.data?.cityFreeze || r.data?.cityUnfreeze;
+    toast(r.status === 200
+      ? (kind === 'freeze' ? `${c.cityName}: ${c.frozen} zone(s) frozen${c.alreadyFrozen ? `, ${c.alreadyFrozen} already frozen` : ''} · new requests are answered Frozen` : `${c.cityName}: ${c.unfrozen} zone(s) unfrozen · new requests are registered if a seat is free`)
+      : (ERRS[r.data?.code] || r.data?.code || 'Not done'));
+  } finally { b.disabled = false; refreshAll(); }
+});
+const zst = (frozen) => { const z = ZONE_STATUS[frozen ? 'frozen' : 'open']; return `<span class="st ${z[1]}" title="${esc(z[2])}">${esc(z[0])}</span>`; };
+let cfg = null, zones = [], sel = null, report = null;
+try { sel = localStorage.getItem('reg.zone'); } catch {}
+
+// ---------------- 1 · business config + zones ----------------
+async function loadConfig() {
+  const r = await api('GET', '/tickets/config');
+  if (r.status !== 200) return;
+  cfg = r.data;
+  $('#hName').textContent = cfg.business.programName;
+  document.title = cfg.business.programName;
+  if (document.activeElement !== $('#cName')) $('#cName').value = cfg.business.programName;
+  if (document.activeElement !== $('#cMax')) $('#cMax').value = cfg.business.maxPerIts;
+  if (document.activeElement !== $('#tLines')) $('#tLines').value = cfg.tech.terminalLines;
+  const t = cfg.techInfo;
+  $('#techKv').innerHTML = `<div>Redis</div><div><b>${esc(t.redis.host)}:${t.redis.port}</b> · version ${esc(t.redis.version)} · ${esc(t.redis.usedMemory)} used · ${fmtN(t.redis.keys)} keys · append-only file ${t.redis.aof ? 'on' : 'off'}</div>
+    <div>Seats per ITS id</div><div>${cfg.business.maxPerIts} (business setting above)</div>`;
+  $('#rules').innerHTML = `<div><b>FIFO:</b> ${esc(t.fifo)}</div><div><b>Atomic:</b> ${esc(t.atomic)}</div><div><b>No duplicates:</b> ${esc(t.duplicateGuard)}</div>`;
+}
+const prevZ = new Map();      // zone id -> last values shown (for highlighting)
+const lastChange = {};          // zone id -> { at, html }
+const edits = {};               // zone id -> { total?, hold? } typed but not yet saved
+const FIELDS = [['available', 'available'], ['held', 'frozen'], ['confirmed', 'booked'], ['waiting', 'waiting'], ['total', 'total'], ['hold', 'holdMs']];
+function zoneRowHtml(z) {
+  return `<tr data-z="${esc(z.id)}">
+    <td>${esc(z.city)}</td><td><b>${esc(z.name)}</b></td><td data-f="status"></td>
+    <td><input type="number" min="1" class="num" style="width:90px" data-in="total" title="Total seats: type and press Update or Enter"></td>
+    <td class="num" data-f="available"></td><td class="num" data-f="confirmed"></td>
+    <td class="lastchg" data-f="last"></td>
+    <td style="white-space:nowrap"><button class="btn small" data-act="update">Update</button> <button class="btn small secondary" data-freeze="freeze">Freeze</button> <button class="btn small danger secondary" data-reset="1">Reset</button></td></tr>`;
+}
+function flash(el, was) { el.classList.remove('chg'); void el.offsetWidth; el.classList.add('chg'); if (was !== undefined) el.title = `was ${was}`; }
+function renderZoneTable() {
+  const body = $('#zRows');
+  const sig = zones.map((z) => z.id).join(',');
+  if (body.dataset.sig !== sig) { body.innerHTML = zones.map(zoneRowHtml).join('') || '<tr><td colspan="8" class="muted">No zones yet. Add one below.</td></tr>'; body.dataset.sig = sig; }
+  for (const z of zones) {
+    const tr = body.querySelector(`tr[data-z="${CSS.escape(z.id)}"]`); if (!tr) continue;
+    tr.classList.toggle('sel', z.id === sel);
+    const prev = prevZ.get(z.id), changed = [];
+    const set = (f, html, cmp) => { const td = tr.querySelector(`[data-f="${f}"]`); td.innerHTML = html; if (prev && prev[f] !== cmp) { flash(td, prev[f]); changed.push(`${f} ${prev[f]} → ${cmp}`); } };
+    set('status', zst(z.zoneFrozen), z.zoneFrozen ? 'Frozen' : 'Open');
+    set('available', `<b>${fmtN(z.available)}</b>`, z.available);
+    set('confirmed', fmtN(z.booked), z.booked);
+    for (const [k, v] of [['total', z.total]]) {
+      const inp = tr.querySelector(`[data-in="${k}"]`);
+      const typed = edits[z.id]?.[k];
+      if (document.activeElement !== inp && typed === undefined) inp.value = v;
+      inp.classList.toggle('edited', typed !== undefined && Number(typed) !== v);
+      if (prev && prev[k] !== v) { flash(inp, prev[k]); changed.push(`total seats ${prev[k]} → ${v}`); }
+    }
+    const fb = tr.querySelector('[data-freeze]');
+    fb.dataset.freeze = z.zoneFrozen ? 'unfreeze' : 'freeze'; fb.textContent = z.zoneFrozen ? 'Unfreeze' : 'Freeze'; fb.classList.toggle('secondary', !z.zoneFrozen);
+    if (changed.length && !lastChange[z.id]?.pin) lastChange[z.id] = { at: Date.now(), html: `<span class="muted">${tm(Date.now())}</span> · ${esc(changed.join(', '))}` };
+    const lc = tr.querySelector('[data-f="last"]'), want = lastChange[z.id]?.html ?? '<span class="muted">—</span>';
+    if (lc.innerHTML !== want) { lc.innerHTML = want; if (lastChange[z.id]) flash(lc); }
+    if (lastChange[z.id]?.pin && Date.now() - lastChange[z.id].at > 15000) lastChange[z.id].pin = false; // keep a verify result on screen 15 s
+    prevZ.set(z.id, { status: z.zoneFrozen ? 'Frozen' : 'Open', available: z.available, held: z.frozen, confirmed: z.booked, waiting: z.waiting, total: z.total, hold: z.holdMs / 1000 });
+  }
+}
+async function loadZones() {
+  const r = await api('GET', '/tickets/zones');
+  if (r.status !== 200) return;
+  zones = r.data;
+  if (!sel || !zones.find((z) => z.id === sel)) sel = zones[0]?.id ?? null;
+  renderZoneTable();
+  renderCities();
+  // register + terminal + load test selects
+  const cities = [...new Set(zones.map((z) => z.city))];
+  const curCity = $('#rCity').value || zones.find((z) => z.id === sel)?.city || cities[0];
+  const co = cities.map((c) => `<option ${c === curCity ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  if ($('#rCity').innerHTML !== co && document.activeElement !== $('#rCity')) $('#rCity').innerHTML = co;
+  const zo = zones.filter((z) => z.city === $('#rCity').value).map((z) => `<option value="${esc(z.id)}" ${z.id === sel ? 'selected' : ''}>${esc(z.name)} · ${fmtN(z.available)} available${z.zoneFrozen ? ' · frozen' : ''}</option>`).join('');
+  if ($('#rZone').innerHTML !== zo && document.activeElement !== $('#rZone')) $('#rZone').innerHTML = zo;
+  const all = zones.map((z) => `<option value="${esc(z.id)}">${esc(z.city)} · ${esc(z.name)} (${fmtN(z.available)} of ${fmtN(z.total)} available)</option>`).join('');
+  for (const id of ['#ltZone']) {
+    const s = $(id), keep = s.value, extra = '';
+    if (s.dataset.sig !== all && document.activeElement !== s) { s.innerHTML = extra + all; s.value = keep || (id === '#ltZone' ? sel : ''); s.dataset.sig = all; }
+  }
+  const lz = zones.find((z) => z.id === $('#ltZone').value);
+  if (lz) {
+    $('#ltZoneSt').innerHTML = `${zst(lz.zoneFrozen)} <span class="muted" style="font-size:12.5px">available <b class="good">${fmtN(lz.available)}</b> of ${fmtN(lz.total)} · booked <b>${fmtN(lz.booked)}</b></span>`;
+    $('#ltFreeze').textContent = lz.zoneFrozen ? '▶ Unfreeze zone' : '❄ Freeze zone';
+    $('#ltFreeze').dataset.kind = lz.zoneFrozen ? 'unfreeze' : 'freeze';
+    $('#ltFreeze').classList.toggle('secondary', !lz.zoneFrozen);
+  }
+  if (lz) $('#ltHint').textContent = `${lz.city} · ${lz.name}: ${fmtN(lz.total)} seats. With ${fmtN(lz.total)} seat(s) and ${fmtN(+$('#ltTotal').value)} requests, exactly ${fmtN(Math.min(lz.total, autoIts(+$('#ltTotal').value)))} ITS ids are confirmed at once, in request order; everyone else gets No seats available or is a duplicate. Each of ${fmtN(autoIts(+$('#ltTotal').value))} real ITS ids sends ~5 requests at the same moment.`;
+}
+
+/** Read the zone back from Redis and say whether it now holds what was asked. */
+async function verifyZone(id, expect) {
+  const r = await api('GET', `/tickets/zones/${id}`);
+  if (r.status !== 200) return { ok: false, html: '<span class="vbad">✗ could not read the zone back</span>' };
+  const z = r.data, bad = [];
+  if (expect.total !== undefined && z.total !== expect.total) bad.push(`total is ${z.total}, expected ${expect.total}`);
+  if (expect.frozen !== undefined && z.zoneFrozen !== expect.frozen) bad.push(`zone is ${z.zoneFrozen ? 'frozen' : 'open'}`);
+  const now = `total ${fmtN(z.total)} · available ${fmtN(z.available)} · confirmed ${fmtN(z.booked)}${z.zoneFrozen ? ' · frozen' : ''}`;
+  return bad.length ? { ok: false, html: `<span class="vbad">✗ Not as expected: ${esc(bad.join('; '))}</span> · Redis now: ${esc(now)}` } : { ok: true, html: `<span class="vok">✓ Verified in Redis</span> · ${esc(now)}` };
+}
+async function zoneAction(id, kind, btn) {
+  const z = zones.find((x) => x.id === id), tr = btn.closest('tr');
+  let r, expect = {}, what = '';
+  if (kind === 'update') {
+    const total = Math.floor(+tr.querySelector('[data-in="total"]').value);
+    const body = {};
+    if (total !== z.total) { body.total = total; expect.total = total; what += `total seats ${z.total} → ${total}`; }
+    if (!Object.keys(body).length) { toast('Nothing to update: type a new number first'); return; }
+    if (!(total >= 1)) { toast('Seats must be 1 or more'); return; }
+    r = await api('PATCH', `/tickets/zones/${id}`, body);
+  } else if (kind === 'freeze' || kind === 'unfreeze') {
+    r = await api('POST', `/tickets/zones/${id}/zone-${kind}`, kind === 'freeze' ? { reason: 'frozen from the registration page' } : undefined);
+    expect.frozen = kind === 'freeze'; what = kind === 'freeze' ? 'freeze' : 'unfreeze';
+  } else {
+    r = await api('POST', `/tickets/zones/${id}/reset`); what = 'reset';
+  }
+  const v = r.status === 200 ? await verifyZone(id, expect) : { ok: false, html: errText(r.data) };
+  if (r.act) { r.act.verify = v.html; renderActs(); }
+  delete edits[id];
+  lastChange[id] = { at: Date.now(), pin: true, html: `<span class="muted">${tm(Date.now())}</span> · <b>${esc(what.trim() || kind)}</b><br>${v.html}${r.status === 200 && r.data?.movedFromLine ? ` · <b class="frzc">${r.data.movedFromLine}</b> waiting got seats (FIFO)` : ''}` };
+  toast(v.ok ? `${z.city} · ${z.name}: ${what.trim() || kind} ✓` : `${z.city} · ${z.name}: not done`);
+  refreshAll();
+}
+$('#zRows').addEventListener('click', async (e) => {
+  const tr = e.target.closest('tr[data-z]'); if (!tr) return;
+  const id = tr.dataset.z, b = e.target.closest('button');
+  if (!b) { if (!e.target.closest('input')) { sel = id; try { localStorage.setItem('reg.zone', id); } catch {} refreshAll(); } return; }
+  if (b.dataset.reset && b.textContent !== 'Sure?') { b.textContent = 'Sure?'; setTimeout(() => (b.textContent = 'Reset'), 3000); return; }
+  b.disabled = true;
+  try { await zoneAction(id, b.dataset.act === 'update' ? 'update' : b.dataset.freeze || 'reset', b); } finally { b.disabled = false; }
+});
+$('#zRows').addEventListener('input', (e) => {
+  const inp = e.target.closest('[data-in]'); if (!inp) return;
+  const id = inp.closest('tr').dataset.z;
+  (edits[id] ??= {})[inp.dataset.in] = inp.value;
+  inp.classList.add('edited');
+});
+$('#zRows').addEventListener('keydown', (e) => {
+  const inp = e.target.closest('[data-in]');
+  if (inp && e.key === 'Enter') { e.preventDefault(); inp.closest('tr').querySelector('[data-act="update"]').click(); }
+  if (inp && e.key === 'Escape') { const id = inp.closest('tr').dataset.z; delete edits[id]; inp.blur(); renderZoneTable(); }
+});
+$('#cSave').onclick = async () => {
+  const r = await api('PATCH', '/tickets/config', { programName: $('#cName').value, maxPerIts: Math.floor(+$('#cMax').value) });
+  $('#cOut').innerHTML = r.status === 200 ? '<span class="good">Saved</span>' : errText(r.data);
+  loadConfig();
+};
+$('#nAdd').onclick = async () => {
+  const r = await api('POST', '/tickets/zones', { city: $('#nCity').value, name: $('#nZone').value, show: $('#hName').textContent, total: +$('#nSeats').value });
+  $('#nOut').innerHTML = r.status === 200 ? `<span class="good">${esc(r.data.result.toLowerCase())}: ${esc(r.data.id)}</span>` : errText(r.data);
+  if (r.status === 200) { sel = r.data.id; refreshAll(); }
+};
+
+// ---------------- 2 · tech config + nodes ----------------
+$('#tSave').onclick = async () => {
+  const r = await api('PATCH', '/tickets/config', { terminalLines: Math.floor(+$('#tLines').value) });
+  $('#tOut').innerHTML = r.status === 200 ? '<span class="good">Saved</span>' : errText(r.data);
+  loadConfig();
+};
+async function loadNodes() {
+  const r = await api('GET', '/tickets/nodes');
+  if (r.status !== 200) return;
+  const d = r.data;
+  $('#hNodes').textContent = `${d.nodes.length} node${d.nodes.length === 1 ? '' : 's'} live`;
+  $('#nodes').innerHTML = d.nodes.map((n) => `<span class="node"><b>${esc(n.instance)}</b> <span class="muted">${fmtN(n.served)} served · ${n.rssMb} MB · up ${dur(Date.now() - n.startedAt)}</span>
+      ${n.instance === d.self ? '<span class="st open">this page</span>' : `<button class="btn small danger secondary" data-stop="${esc(n.instance)}">Stop</button>`}</span>`).join('')
+    + d.starting.map((n) => `<span class="node"><b>${esc(n.instance)}</b> <span class="st waiting">starting…</span></span>`).join('');
+}
+$('#nodes').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-stop]'); if (!b) return;
+  b.disabled = true;
+  const r = await api('POST', `/tickets/nodes/${encodeURIComponent(b.dataset.stop)}/stop`);
+  $('#ndOut').innerHTML = r.status === 200 ? `<span class="good">Stopping ${esc(b.dataset.stop)}</span>` : errText(r.data);
+  loadNodes();
+});
+$('#ndAdd').onclick = async () => {
+  const r = await api('POST', '/tickets/nodes/start', { count: +$('#ndCount').value || 1 });
+  $('#ndOut').innerHTML = r.status === 200 ? `<span class="good">Starting ${r.data.started.map((x) => esc(x.instance)).join(', ')} (5–10 s)</span>` : errText(r.data);
+  loadNodes();
+};
+
+// ---------------- 3 · register + line ----------------
+let itsPool = [];
+async function randomIts() { if (!itsPool.length) { const r = await api('GET', '/tickets/its-sample?n=50'); itsPool = r.data || []; } return String(itsPool.splice(Math.floor(Math.random() * itsPool.length), 1)[0] ?? ''); }
+let whoT;
+$('#rIts').oninput = () => {
+  clearTimeout(whoT);
+  whoT = setTimeout(async () => {
+    const v = $('#rIts').value.trim();
+    if (!/^\d+$/.test(v)) { $('#rWho').innerHTML = '&nbsp;'; return; }
+    const r = await api('GET', `/tickets/its/${v}`);
+    $('#rWho').innerHTML = r.status === 200 ? `${esc(r.data.name)} · ${esc(r.data.jamaat)}${r.data.cancelled ? ' · <span class="badc">CANCELLED</span>' : ''}` : '<span class="badc">not in Mumin_Mast</span>';
+  }, 250);
+};
+$('#rCity').onchange = () => { const z = zones.find((x) => x.city === $('#rCity').value); if (z) { sel = z.id; refreshAll(); } };
+$('#rZone').onchange = () => { sel = $('#rZone').value; try { localStorage.setItem('reg.zone', sel); } catch {} refreshAll(); };
+$('#rNew').onclick = () => { $('#rRid').value = newRid(); };
+$('#rRandom').onclick = async () => { $('#rIts').value = await randomIts(); $('#rIts').oninput(); $('#rRid').value = newRid(); };
+$('#rGo').onclick = async () => {
+  const rid = $('#rRid').value.trim() || newRid();
+  const r = await api('POST', `/tickets/zones/${$('#rZone').value}/book`, { muminId: +$('#rIts').value.trim(), qty: 1 }, { 'Idempotency-Key': rid });
+  const q = r.data?.request;
+  $('#rOut').innerHTML = r.status === 200 ? `<span class="good"><b>${q.status === 'BOOKED' ? 'Confirmed' : 'Seat held'}</b></span> for ITS ${esc(q.user)} · request <code>${esc(q.rid)}</code>`
+    : r.status === 202 && q?.status === 'PAUSED' ? `<span class="st frozen">❄ Frozen</span> · zone is frozen · place <b>${dash(q.position)}</b> in request order · dropped when the zone is unfrozen · request <code>${esc(q.rid)}</code>`
+    : r.status === 202 ? `<span class="warnc"><b>Waiting</b></span> · place <b>${dash(q.position)}</b> in line${q.duringZoneFreeze ? ' (zone is frozen)' : ''} · request <code>${esc(q.rid)}</code>`
+    : r.status === 423 && r.data?.outcome === 'ZONE_FROZEN' ? `<span class="st frozen">❄ Frozen</span> · zone is frozen · not booked, not kept for later · request <code>${esc(q?.rid)}</code>`
+    : r.status === 409 && r.data?.outcome === 'NO_SEATS' ? `<span class="badc"><b>No seats available</b></span> · all seats are confirmed · not registered · request <code>${esc(q?.rid)}</code>`
+    : r.status === 409 && r.data?.outcome === 'DUPLICATE' ? `<span class="badc"><b>Duplicate</b></span> · ${r.data.code === 'REQUEST_ID_ALREADY_USED' ? 'same request id already used' : 'this ITS id already has an open registration here'}: <code>${esc(q?.rid)}</code> is ${esc((WORD[q?.status] || [q?.status])[0])}`
+    : errText(r.data);
+  refreshAll();
+};
+async function loadLine() {
+  if (!sel) return;
+  const r = await api('GET', `/tickets/zones/${sel}/report?limit=300`);
+  if (r.status !== 200) return;
+  report = r.data;
+  const z = report.zone;
+  $('#lTitle').textContent = `${z.city} · ${z.name}${z.zoneFrozen ? ' · ❄ frozen' : ''}`;
+  $('#lMeta').textContent = `${fmtN(z.available)} available · ${fmtN(z.frozen)} held · ${fmtN(z.booked)} confirmed · ${fmtN(z.waiting)} waiting`;
+  $('#lFrozen').classList.toggle('on', !!z.zoneFrozen);
+  $('#lFrozen').innerHTML = z.zoneFrozen ? `<b>❄ This zone is frozen</b> since ${tm(z.zoneFreeze.at)}${z.zoneFreeze.reason ? ` (${esc(z.zoneFreeze.reason)})` : ''}. ${fmtN(z.available)} free seat(s) are blocked, new requests join the line. On unfreeze the line is confirmed from #1.` : '';
+  const held = report.frozen.filter((x) => x.kind === 'USER');
+  const confirmed = report.requests.filter((x) => x.status === 'BOOKED').slice(0, 20);
+  const rows = [
+    ...held.map((x) => ({ x, place: '' })),
+    ...report.waiting.slice(0, 50).map((x) => ({ x, place: x.position })),
+    ...confirmed.map((x) => ({ x, place: '' })),
+  ];
+  const prevLine = loadLine.prev, sameZone = loadLine.zone === sel;
+  loadLine.prev = new Map(rows.map(({ x }) => [x.rid, x.status])); loadLine.zone = sel;
+  $('#lRows').innerHTML = rows.length ? rows.map(({ x, place }) => `<tr><td class="num"><b>${dash(x.order)}</b></td><td class="num">${place ? `<b class="warnc">${place}</b>` : `<span class="muted" title="Not in the waiting line: ${x.status === 'FROZEN' ? 'holds a seat' : 'confirmed'}">${x.status === 'FROZEN' ? 'has seat' : 'done'}</span>`}</td><td><b>${esc(x.user)}</b></td><td class="muted">${dash(x.name)}</td><td style="font-family:var(--mono);font-size:12px">${esc(x.rid)}</td><td>${st(x.status)}</td>
+      <td>${x.status === 'FROZEN' ? `<button class="btn small danger secondary" data-act="release" data-rid="${esc(x.rid)}">Cancel</button>`
+        : x.status === 'WAITING' ? `<button class="btn small danger secondary" data-act="release" data-rid="${esc(x.rid)}">Cancel</button>`
+        : `<button class="btn small danger secondary" data-act="release" data-rid="${esc(x.rid)}">Cancel</button>`}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="muted">No registrations yet in this zone.</td></tr>';
+  // new rows and status changes stay highlighted for 6 s, even though the list is redrawn every 1.5 s
+  const hot = (loadLine.hot ??= new Map()), now = Date.now();
+  if (prevLine && sameZone) for (const { x } of rows) if (prevLine.get(x.rid) !== x.status) hot.set(x.rid, now + 6000);
+  [...$('#lRows').querySelectorAll('tr')].forEach((tr, i) => { const x = rows[i]?.x; if (x && hot.get(x.rid) > now) tr.classList.add('hot'); });
+  for (const [k, t] of hot) if (t < now) hot.delete(k);
+}
+$('#lRows').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  b.disabled = true;
+  const base = `/tickets/zones/${sel}/requests/${encodeURIComponent(b.dataset.rid)}`;
+  const r = b.dataset.act === 'confirm' ? await api('POST', base + '/confirm') : await api('POST', base + '/release', { reason: 'cancelled from the registration page' });
+  toast(r.status === 200 ? `${b.dataset.rid}: ${(WORD[r.data.request.status] || [r.data.request.status])[0]}${r.data.movedFromLine ? ` · ${r.data.movedFromLine} moved up from the line (FIFO)` : ''}` : (ERRS[r.data?.code] || r.data?.code || 'Not done'));
+  refreshAll();
+});
+
+// ---------------- 4 · load test ----------------
+async function loadLoad() {
+  const r = await api('GET', '/tickets/loadtest/status');
+  if (r.status !== 200) return;
+  const s = r.data;
+  if (!s || s.status === 'none') { $('#ltOut').innerHTML = ''; $('#ltCancel').disabled = true; return; }
+  const running = s.status === 'running';
+  $('#ltStart').disabled = running; $('#ltCancel').disabled = !running;
+  const p1 = s.phases.P1 || {}, r1 = s.metrics['P1.result'], setup = s.metrics['P0.setup'];
+  const done = p1.done || 0, total = p1.total || s.params.total, el = (p1.elapsedMs || 1) / 1000, oc = p1.outcomes || {};
+  $('#ltOut').innerHTML = `${running ? `<div class="banner run">Running · ${esc(s.phases[s.phase]?.title || 'starting')}</div>`
+      : `<div class="banner ${s.status === 'passed' ? 'pass' : 'fail'}">${s.status === 'passed' ? 'PASSED' : esc(s.status.toUpperCase())} · ${fmtN(s.params.total)} requests over ${s.nodes.length} node(s)${s.end?.totalSeconds ? ` in ${s.end.totalSeconds} s` : ''}${s.error ? ` · ${esc(s.error)}` : ''}</div>`}
+    ${setup ? `<div class="muted" style="font-size:13px">${setup.real ? `Real zone <b>${esc(setup.city)} · ${esc(setup.name)}</b>` : 'Test zone'}: ${fmtN(setup.available)} seat(s) available at the start · ${fmtN(setup.its)} real ITS ids · ${setup.maxPerIts} seat per ITS id</div>` : ''}
+    <div class="bar"><div style="width:${(100 * done / total).toFixed(1)}%"></div></div>
+    <div style="font-size:13px"><b>${fmtN(done)}</b> / ${fmtN(total)} answered · ${fmtN(Math.round(done / el))} per second${r1 ? ` · response p50 ${r1.latencyMs.p50} ms · p95 ${r1.latencyMs.p95} ms` : ''}</div>
+    <div class="chips"><span class="chip f">${fmtN(oc.FROZEN || 0)} confirmed at once</span>${oc.NO_SEATS ? `<span class="chip d">${fmtN(oc.NO_SEATS)} no seats available</span>` : ''}${oc.WAITING ? `<span class="chip w">${fmtN(oc.WAITING)} waiting in FIFO line</span>` : ''}${oc.PAUSED ? `<span class="chip" style="background:var(--ice-weak);color:var(--ice)">${fmtN(oc.PAUSED)} answered Frozen (zone frozen, not booked)</span>` : ''}
+      <span class="chip d">${fmtN((oc.DUP_REQUEST_ID || 0) + (oc.DUP_ITS || 0))} duplicates blocked</span><span class="chip ${oc.OTHER ? 'd' : ''}">${fmtN(oc.OTHER || 0)} errors</span></div>
+    ${(s.phases.P2?.rounds || []).length ? `<div style="font-size:13px">Cancel rounds: ${s.phases.P2.rounds.map((x) => `round ${x.round}: ${fmtN(x.released ?? 0)} cancelled${x.movedFromLine ? ` → <b class="frzc">${fmtN(x.movedFromLine)}</b> next in line got the seat` : ' → seats available again'}`).join(' · ')}</div>` : ''}
+    ${s.checks.length ? `<ul class="checks">${s.checks.map((c) => `<li><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'}</span> ${esc(c.label)}</li>`).join('')}</ul>` : ''}`;
+}
+$('#ltStart').onclick = async () => {
+  const r = await api('POST', '/tickets/loadtest/start', { zone: $('#ltZone').value, resetFirst: true, total: +$('#ltTotal').value, its: autoIts(+$('#ltTotal').value), concurrency: 400, rounds: 3, payPct: 0, adminFreeze: 0, zoneFreezeAt: 0 });
+  if (r.status !== 200) $('#ltOut').innerHTML = errText(r.data);
+  loadLoad();
+};
+$('#ltCancel').onclick = async () => { await api('POST', '/tickets/loadtest/cancel'); toast('Cancelling the load test…'); };
+$('#ltZone').onchange = () => loadZones();
+$('#ltFreeze').onclick = async () => {
+  const id = $('#ltZone').value, kind = $('#ltFreeze').dataset.kind || 'freeze', b = $('#ltFreeze');
+  if (!id) return;
+  b.disabled = true;
+  const r = await api('POST', `/tickets/zones/${id}/zone-${kind}`, kind === 'freeze' ? { reason: 'frozen from the load test panel' } : undefined);
+  const v = r.status === 200 ? await verifyZone(id, { frozen: kind === 'freeze' }) : { ok: false, html: errText(r.data) };
+  if (r.act) { r.act.verify = v.html; renderActs(); }
+  toast(r.status === 200 ? (kind === 'freeze' ? 'Zone frozen: every new request is answered Frozen (not booked)' : 'Zone unfrozen: new requests are booked if a seat is free') : (ERRS[r.data?.code] || r.data?.code || 'Not done'));
+  b.disabled = false;
+  loadZones();
+};
+$('#ltTotal').oninput = () => loadZones();
+/** seats up / down for the load-test zone (same as editing Total seats; only free seats can be removed) */
+async function changeSeats(sign) {
+  const id = $('#ltZone').value, z = zones.find((x) => x.id === id), n = Math.floor(+$('#ltSeats').value);
+  if (!z || !(n > 0)) { toast('Pick a zone and a number of seats'); return; }
+  const total = z.total + sign * n;
+  if (total < 1) { toast(`Cannot go below 1 seat (now ${fmtN(z.total)})`); return; }
+  const r = await api('PATCH', `/tickets/zones/${id}`, { total });
+  toast(r.status === 200 ? `${z.city} · ${z.name}: ${r.data.changes}` : (ERRS[String(r.data?.code ?? '').split(':')[0]] || r.data?.message || r.data?.code || 'Not done'));
+  loadZones();
+}
+$('#ltSeatsUp').onclick = () => changeSeats(1);
+$('#ltSeatsDown').onclick = () => changeSeats(-1);
+/** each ITS id sends 5 requests at the same instant (to test duplicates); between 100 and 50,000 ITS ids */
+function autoIts(total) { return Math.max(100, Math.min(50000, Math.round((total || 0) / 5))); }
+
+// ---------------- header ----------------
+let clearArm = 0;
+$('#clearAll').onclick = async () => {
+  const b = $('#clearAll');
+  if (Date.now() - clearArm > 5000) { clearArm = Date.now(); b.textContent = 'Click again to clear everything'; setTimeout(() => { if (Date.now() - clearArm >= 5000) b.textContent = 'Clear all data'; }, 5100); return; }
+  clearArm = 0; b.textContent = 'Clearing…';
+  const r = await api('POST', '/tickets/clear-all');
+  b.textContent = 'Clear all data';
+  toast(r.status === 200 ? `Cleared · ${fmtN(r.data.removedRequests)} registrations removed · zones keep their seats` : 'Clear failed');
+  refreshAll();
+};
+$('#themeBtn').onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('reg.theme', document.documentElement.dataset.theme); } catch {}
+};
+try { const t = localStorage.getItem('reg.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+
+// ---------------- downloads ----------------
+function saveUrl(url) { const a = document.createElement('a'); a.href = url; a.download = ''; document.body.append(a); a.click(); a.remove(); }
+function saveText(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8' }));
+  a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+const csvCell = (v) => { const t = String(v ?? ''); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+async function loadTestCsv() {
+  const r = await api('GET', '/tickets/loadtest/status');
+  const s = r.data;
+  if (!s || s.status === 'none') { toast('No load test has run yet'); return; }
+  const r1 = s.metrics['P1.result'] || {}, setup = s.metrics['P0.setup'] || {}, oc = r1.outcomes || {};
+  const rows = [['section', 'item', 'value'],
+    ['run', 'result', s.status.toUpperCase()], ['run', 'started', new Date(s.startedAt).toLocaleString('en-IN')], ['run', 'total seconds', s.end?.totalSeconds ?? ''],
+    ['run', 'nodes', s.nodes.join(' ')], ['setup', 'zone', setup.zone ?? ''], ['setup', 'seats available at start', setup.available ?? ''], ['setup', 'ITS ids', setup.its ?? ''],
+    ['setup', 'requests', s.params.total], ['setup', 'in flight', s.params.concurrency], ['speed', 'requests per second', r1.perSecond ?? ''],
+    ['speed', 'latency p50 ms', r1.latencyMs?.p50 ?? ''], ['speed', 'latency p95 ms', r1.latencyMs?.p95 ?? ''], ['speed', 'latency p99 ms', r1.latencyMs?.p99 ?? ''], ['speed', 'latency max ms', r1.latencyMs?.max ?? ''],
+    ['outcome', 'confirmed at once', oc.FROZEN ?? ''], ['outcome', 'waiting in FIFO line', oc.WAITING ?? ''], ['outcome', 'duplicate: same request id', oc.DUP_REQUEST_ID ?? ''],
+    ['outcome', 'duplicate: ITS already open', oc.DUP_ITS ?? ''], ['outcome', 'errors', oc.OTHER ?? ''],
+    ...Object.entries(s.phases.P1?.perNode || {}).map(([k, v]) => ['per node', k, v]),
+    ...(s.phases.P2?.rounds || []).map((x) => ['cancel round ' + x.round, 'cancelled → next in line got the seat', `${x.released ?? 0} → ${x.movedFromLine ?? 0}`]),
+    ...s.checks.map((c) => ['check', c.label, c.ok ? 'PASS' : 'FAIL'])];
+  saveText(`load-test-${s.id}.csv`, rows.map((r) => r.map(csvCell).join(',')).join('\r\n'));
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dl]'); if (!b) return;
+  switch (b.dataset.dl) {
+    case 'summary': return saveUrl('/tickets/download/summary');
+    case 'zone': return sel ? saveUrl(`/tickets/download/zones/${encodeURIComponent(sel)}/report`) : toast('Pick a zone first');
+    case 'load': return loadTestCsv();
+  }
+});
+
+async function refreshAll() { await loadZones(); loadLine(); }
+$('#rRid').value = newRid();
+randomIts().then((v) => { $('#rIts').value = v; $('#rIts').oninput(); });
+$('#termLink').href = `${location.protocol}//${location.hostname}:3300`;
+loadConfig(); loadNodes(); refreshAll(); loadLoad();
+setInterval(() => { if (!document.hidden) { refreshAll(); loadLoad(); } }, 1500);
+setInterval(() => { if (!document.hidden) { loadNodes(); loadConfig(); } }, 4000);
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TicketsController } from './tickets.controller';
+import { TicketsHttpLog } from './tickets.http-log';
 import { TicketsLoadTest } from './tickets.loadtest';
 import { TicketsNodes } from './tickets.nodes';
 import { TicketsOpLog } from './tickets.oplog';
@@ -7,7 +8,7 @@ import { TicketsService } from './tickets.service';
 
 @Module({
   controllers: [TicketsController],
-  providers: [TicketsOpLog, TicketsService, TicketsNodes, TicketsLoadTest],
+  providers: [TicketsOpLog, TicketsService, TicketsNodes, TicketsLoadTest, TicketsHttpLog],
 })
 export class TicketsModule implements NestModule {
   constructor(private readonly nodes: TicketsNodes) {}

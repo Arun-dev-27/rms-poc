@@ -161,6 +161,7 @@ export class TicketsOpLog implements OnModuleInit, OnModuleDestroy {
     // replies of the last commands settle on the next tick
     setImmediate(() => {
       const head = `${e.action}${e.zone ? ` zone=${e.zone}` : ''}${e.its ? ` its=${e.its}` : ''}${e.rid ? ` rid=${e.rid}` : ''} -> ${e.result} (${e.ms} ms, ${e.ops.length} Redis ops)${e.note ? ` | ${e.note}` : ''}`;
+      if (e.ops.length > 300) e.ops = [...e.ops.slice(0, 300), { c: '...', k: '', a: `${e.ops.length - 300} more Redis ops not listed`, r: '' } as Op];
       const lines = e.ops.map((o, i) => `    ${String(i + 1).padStart(3)}. ${o.lua ? '  [lua] ' : ''}${o.c} ${o.k}${o.a ? ` ${o.a}` : ''} -> ${o.r}`);
       this.logger.log([head, ...lines].join('\n'));
       this.file?.write(JSON.stringify(e) + '\n');

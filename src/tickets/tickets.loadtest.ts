@@ -12,7 +12,7 @@ const CANCEL_KEY = 'tb:loadtest:cancel';
 export interface TicketLoadState {
   id: string; status: 'running' | 'passed' | 'failed' | 'cancelled' | 'error';
   startedAt: number; finishedAt?: number; heartbeatAt?: number; runner: string; nodes: string[];
-  params: Record<string, number>; phase?: string;
+  params: Record<string, any>; phase?: string;
   phases: Record<string, { title: string; total?: number; done?: number; elapsedMs?: number; statuses?: Record<string, number>; outcomes?: Record<string, number>; perNode?: Record<string, number>; rounds?: unknown[] }>;
   metrics: Record<string, unknown>; checks: { label: string; ok: boolean }[]; end?: any; log: string[]; error?: string;
 }
@@ -42,7 +42,7 @@ export class TicketsLoadTest implements OnModuleDestroy {
     return s;
   }
 
-  async start(params: Record<string, number>) {
+  async start(params: Record<string, any>) {
     if ((await this.status()).status === 'running') throw new ConflictException('a load test is already running');
     const urls = await this.nodes.aliveUrls();
     if (!urls.length) throw new BadRequestException('no live nodes');
@@ -62,7 +62,8 @@ export class TicketsLoadTest implements OnModuleDestroy {
     this.child.on('exit', (code) => void this.onExit(code));
     this.timer = setInterval(async () => {
       await this.save();
-      if (this.child && (await this.redis.client.get(CANCEL_KEY))) { this.state!.status = 'cancelled'; this.child.kill(); }
+      const child = this.child; // may exit (and be cleared) during the await below
+      if (child && (await this.redis.client.get(CANCEL_KEY)) && this.child === child) { this.state!.status = 'cancelled'; child.kill(); }
     }, 500);
     this.logger.log(`Ticket load test ${id} started over ${urls.join(', ')}`);
     return this.state;
@@ -108,7 +109,7 @@ export class TicketsLoadTest implements OnModuleDestroy {
     const p1 = s.metrics['P1.result'] as any;
     // one summary in the Redis key log (each load-test request is not logged one by one)
     this.oplog.note('load-test', {
-      zone: 'load-test-zone-1', ms: s.finishedAt - s.startedAt,
+      zone: s.params.zone || 'load-test-zone-1', ms: s.finishedAt - s.startedAt,
       result: `${s.status.toUpperCase()}: ${s.params.total} requests over ${s.nodes.length} node(s)${p1 ? `, ${p1.perSecond}/s, p95 ${p1.latencyMs.p95} ms` : ''}; ${s.checks.filter((c) => c.ok).length}/${s.checks.length} checks passed`,
       note: `nodes: ${s.nodes.join(', ')}. Per-request Redis commands are not listed (bulk test); each booking = 1 atomic script tbBook on the keys shown in a manual "book" entry.`,
     });

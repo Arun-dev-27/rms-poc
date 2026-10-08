@@ -47,8 +47,27 @@ local function ev(kind, r, note)
     'qty', tostring(r.qty or ''), 'available', tostring(zget('available')), 'frozen', tostring(zget('frozen')),
     'booked', tostring(zget('booked')), 'waiting', tostring(redis.call('LLEN', WAIT)), 'note', note or '')
 end
+local function markBooked(r)
+  redis.call('HSET', ZONE, 'lastBookedRid', r.rid, 'lastBookedIts', r.user or '', 'lastBookedSeq', tostring(r.seq or ''), 'lastBookedAt', tostring(NOW))
+end
 local function freeze(r, cause, by)
   redis.call('HINCRBY', ZONE, 'available', -r.qty)
+  -- confirm mode "direct" (registration): no hold, the seat is CONFIRMED at once, in request order.
+  -- The ITS id stays registered (its open-request marker is kept), so registering again is a duplicate.
+  if r.kind == 'USER' and redis.call('HGET', ZONE, 'direct') == '1' then
+    redis.call('HINCRBY', ZONE, 'booked', r.qty)
+    setStatus(r, 'BOOKED')
+    r.frozenAt = NOW
+    r.bookedAt = NOW
+    r.cause = cause
+    r.freedBy = by
+    if cause == 'WAITLIST' then r.leftLineAt = NOW end
+    putReq(r)
+    markBooked(r)
+    ev('BOOKED', r, cause == 'WAITLIST' and ('confirmed from the waiting line (joined at #' .. tostring(r.joinPos) .. '); seat freed by ' .. by) or 'seat free, confirmed directly')
+    if zget('available') == 0 then ev('NO_TICKETS_LEFT', r, 'all seats confirmed; new requests get NO SEATS AVAILABLE') end
+    return
+  end
   redis.call('HINCRBY', ZONE, 'frozen', r.qty)
   setStatus(r, 'FROZEN')
   r.frozenAt = NOW
@@ -151,20 +170,42 @@ redis.call('ZADD', ZREQS, seq, rid)
 if kind == 'USER' then redis.call('ZADD', BYITS, seq, rid) end
 redis.call('HSET', ACTIVE, activeKey(r), rid)
 -- admin freezes take free tickets directly; users never overtake the waiting line
+-- direct mode (registration) has no waiting line: a free seat is confirmed in request order, else NO SEATS
 local zf = zoneFrozen()
-if kind == 'ADMIN' or (not zf and redis.call('LLEN', WAIT) == 0 and zget('available') >= qty) then
+local direct = redis.call('HGET', ZONE, 'direct') == '1'
+if kind == 'ADMIN' or (not zf and zget('available') >= qty and (direct or redis.call('LLEN', WAIT) == 0)) then
   freeze(r, 'DIRECT', '')
-  return {'FROZEN', cjson.encode(r), ''}
+  return {r.status == 'BOOKED' and 'BOOKED' or 'FROZEN', cjson.encode(r), ''}
 end
-setStatus(r, 'WAITING')
+if direct and zf then
+  -- zone frozen: answered FROZEN at once. Nothing is kept for later (no line, no order, ITS id not held),
+  -- so the unfreeze has nothing to process; after the unfreeze a new request is booked if a seat is free.
+  setStatus(r, 'ZONE_FROZEN')
+  r.endedAt = NOW
+  r.duringZoneFreeze = redis.call('HGET', ZONE, 'pauseId')
+  closeActive(r)
+  putReq(r)
+  ev('REFUSED_ZONE_FROZEN', r, 'zone is frozen: not booked, not stored for later')
+  return {'ZONE_FROZEN', cjson.encode(r), ''}
+end
+if direct and not zf then
+  -- all seats confirmed: answered NO SEATS, not registered (the ITS id may try again if a seat is cancelled)
+  setStatus(r, 'NO_SEATS')
+  r.endedAt = NOW
+  closeActive(r)
+  putReq(r)
+  ev('NO_SEATS', r, 'no seats available (' .. tostring(zget('available')) .. ' free, ' .. tostring(qty) .. ' asked); not registered')
+  return {'NO_SEATS', cjson.encode(r), ''}
+end
+setStatus(r, zf and 'PAUSED' or 'WAITING')
 r.joinPos = redis.call('RPUSH', WAIT, rid)
 if zf then r.duringZoneFreeze = redis.call('HGET', ZONE, 'pauseId') end
 putReq(r)
 if zf then
-  ev('WAITING', r, 'zone is frozen (everything except booked); joined the waiting line at #' .. tostring(r.joinPos) .. ', served in order after the unfreeze')
-else
-  ev('WAITING', r, 'not enough free tickets now (' .. tostring(zget('available')) .. ' free); joined the waiting line at #' .. tostring(r.joinPos))
+  ev('PAUSED', r, 'zone is frozen: request FROZEN at #' .. tostring(r.joinPos) .. ' in request order; processed when the zone is unfrozen')
+  return {'PAUSED', cjson.encode(r), ''}
 end
+ev('WAITING', r, 'not enough free tickets now (' .. tostring(zget('available')) .. ' free); joined the waiting line at #' .. tostring(r.joinPos))
 return {'WAITING', cjson.encode(r), ''}`;
 
 /** ARGV = [zone, requestId] */
@@ -186,6 +227,7 @@ setStatus(r, 'BOOKED')
 r.bookedAt = NOW
 closeActive(r)
 putReq(r)
+markBooked(r)
 ev('BOOKED', r, 'payment done; frozen tickets booked')
 return {'BOOKED', cjson.encode(r), ''}`;
 
@@ -197,7 +239,7 @@ if not r or r.zone ~= ZID then return {'ERR', 'REQUEST_NOT_FOUND', ''} end
 local moved = 0
 if r.status == 'FROZEN' then
   moved = unfreeze(r, 'RELEASED', reason)
-elseif r.status == 'WAITING' then
+elseif r.status == 'WAITING' or r.status == 'PAUSED' then
   redis.call('LREM', WAIT, 1, r.rid)
   setStatus(r, 'CANCELLED')
   r.endedAt = NOW
@@ -211,6 +253,7 @@ elseif r.status == 'BOOKED' then
   redis.call('HINCRBY', ZONE, 'available', r.qty)
   setStatus(r, 'BOOKING_CANCELLED')
   r.endedAt = NOW
+  closeActive(r) -- direct mode keeps the ITS registered until it cancels
   putReq(r)
   ev('BOOKING_CANCELLED', r, reason)
   moved = promote(r.rid)
@@ -268,9 +311,11 @@ local oldTotal = zget('total')
 if total > 0 and total ~= oldTotal then
   local used = zget('frozen') + zget('booked')
   if total < used then return {'ERR', 'TOTAL_BELOW_USED', tostring(used)} end
+  local oldAvail = zget('available')
   redis.call('HSET', ZONE, 'total', total, 'available', total - used)
-  if total > oldTotal then table.insert(changes, 'added ' .. tostring(total - oldTotal) .. ' tickets (' .. tostring(oldTotal) .. ' -> ' .. tostring(total) .. ')')
-  else table.insert(changes, 'removed ' .. tostring(oldTotal - total) .. ' free tickets (' .. tostring(oldTotal) .. ' -> ' .. tostring(total) .. ')') end
+  local seatTxt = 'seats ' .. tostring(oldTotal) .. ' -> ' .. tostring(total) .. ', available ' .. tostring(oldAvail) .. ' -> ' .. tostring(total - used) .. ', booked ' .. tostring(zget('booked'))
+  if total > oldTotal then table.insert(changes, 'seats increased +' .. tostring(total - oldTotal) .. ' (' .. seatTxt .. ')')
+  else table.insert(changes, 'seats reduced -' .. tostring(oldTotal - total) .. ' (' .. seatTxt .. ')') end
 end
 if holdMs > 0 and holdMs ~= zget('holdMs') then
   table.insert(changes, 'freeze time ' .. tostring(zget('holdMs') / 1000) .. ' s -> ' .. tostring(holdMs / 1000) .. ' s (new freezes)')
@@ -305,7 +350,7 @@ if newQty > 0 and newQty ~= oldQty then
     end
     redis.call('HINCRBY', ZONE, 'available', -d)
     redis.call('HINCRBY', ZONE, 'frozen', d)
-  elseif r.status == 'WAITING' then
+  elseif r.status == 'WAITING' or r.status == 'PAUSED' then
     if newQty > zget('total') then return {'ERR', 'MORE_THAN_TOTAL', ''} end
   elseif r.status == 'BOOKED' then
     if d > 0 then return {'ERR', 'BOOKED_ONLY_LESS', ''} end
@@ -347,6 +392,7 @@ return {'OK', cjson.encode(r), tostring(moved)}`;
  */
 const TRACE_HEAD = `
 local __LOG = {}
+local __N = 0 -- ops run; only the first 300 are listed (a big unfreeze can run tens of thousands)
 local __rc = redis.call
 local function __short(v)
   local t = type(v)
@@ -365,6 +411,8 @@ local function __short(v)
 end
 local function R(cmd, ...)
   local res = __rc(cmd, ...)
+  __N = __N + 1
+  if __N > 300 then return res end
   local a = {...}
   local args = {}
   for i = 2, math.min(#a, 8) do args[#args + 1] = __short(a[i]) end
@@ -383,6 +431,7 @@ export function withRedisLog(src: string): string {
   return `${TRACE_HEAD}${src.split('redis.call(').join('R(')}
 end
 local __res = __main()
+if __N > 300 then __LOG[#__LOG + 1] = {'...', '', tostring(__N - 300) .. ' more Redis ops not listed', ''} end
 return {__res, cjson.encode(__LOG)}`;
 }
 
@@ -401,10 +450,13 @@ if zoneFrozen() then return {'ERR', 'ALREADY_FROZEN', redis.call('HGET', ZONE, '
 local id, reason, allowPay = ARGV[2], ARGV[3], ARGV[4]
 local snap = { available = zget('available'), frozen = zget('frozen'), booked = zget('booked'), waiting = redis.call('LLEN', WAIT),
   heldRequests = redis.call('ZCARD', HOLDS) }
+local lb = redis.call('HMGET', ZONE, 'lastBookedRid', 'lastBookedIts', 'lastBookedSeq', 'lastBookedAt')
+if lb[1] then snap.lastBooked = { rid = lb[1], its = lb[2], seq = tonumber(lb[3]), at = tonumber(lb[4]) } end
 redis.call('HSET', ZONE, 'paused', '1', 'pausedAt', NOW, 'pauseId', id, 'pauseReason', reason, 'pauseAllowPay', allowPay)
 local p = { id = id, at = NOW, reason = reason, allowPay = allowPay == '1', atFreeze = snap }
 redis.call('RPUSH', PAUSES, cjson.encode(p))
-ev('ZONE_FROZEN', {}, 'everything except booked frozen: ' .. tostring(snap.available) .. ' free tickets blocked, ' .. tostring(snap.heldRequests)
+ev('ZONE_FROZEN', {}, 'last booked before the freeze: ' .. (snap.lastBooked and ('ITS ' .. snap.lastBooked.its .. ', request ' .. snap.lastBooked.rid .. ' (order #' .. tostring(snap.lastBooked.seq) .. ')') or 'none') .. '; '
+  .. tostring(snap.booked) .. ' booked; everything except booked frozen: ' .. tostring(snap.available) .. ' free tickets blocked, ' .. tostring(snap.heldRequests)
   .. ' held requests paused (' .. (allowPay == '1' and 'may still pay' or 'cannot pay, timer paused') .. '), ' .. tostring(snap.waiting) .. ' waiting; new requests join the line. Reason: ' .. reason)
 return {'OK', cjson.encode(p), ''}`;
 
@@ -427,6 +479,32 @@ for i = 1, #holds, 2 do
 end
 redis.call('HSET', ZONE, 'paused', '0')
 redis.call('HDEL', ZONE, 'pausedAt', 'pauseId', 'pauseReason', 'pauseAllowPay')
+local paused, dropped = 0, 0
+if redis.call('HGET', ZONE, 'direct') == '1' then
+  -- direct mode: requests that came while frozen are DROPPED (not processed) and their ITS ids freed;
+  -- only requests that arrive after the unfreeze are processed, in request order
+  local keep = {}
+  for _, rid in ipairs(redis.call('LRANGE', WAIT, 0, -1)) do
+    local r = getReq(rid)
+    if r and r.status == 'PAUSED' then
+      setStatus(r, 'DROPPED')
+      r.endedAt = NOW
+      r.leftLineAt = NOW
+      closeActive(r)
+      putReq(r)
+      dropped = dropped + 1
+    elseif r and r.status == 'WAITING' then keep[#keep + 1] = rid end
+  end
+  redis.call('DEL', WAIT)
+  for i = 1, #keep, 5000 do redis.call('RPUSH', WAIT, unpack(keep, i, math.min(i + 4999, #keep))) end
+else
+  -- hold mode: requests that came while frozen (PAUSED) are processed now, in request order: they already
+  -- hold their place in the list, so they become WAITING and the line is served from the top
+  for _, rid in ipairs(redis.call('LRANGE', WAIT, 0, -1)) do
+    local r = getReq(rid)
+    if r and r.status == 'PAUSED' then setStatus(r, 'WAITING'); putReq(r); paused = paused + 1 end
+  end
+end
 local moved = promote('zone-unfreeze:' .. id)
 local last = redis.call('LINDEX', PAUSES, -1)
 local p = last and cjson.decode(last) or { id = id }
@@ -434,8 +512,10 @@ p.endedAt = NOW
 p.durationMs = dur
 p.movedFromLine = moved
 p.timersResumed = #holds / 2
+p.frozenRequests = paused
+p.droppedRequests = dropped
 p.atUnfreeze = { available = zget('available'), frozen = zget('frozen'), booked = zget('booked'), waiting = redis.call('LLEN', WAIT) }
 if last then redis.call('LSET', PAUSES, -1, cjson.encode(p)) end
-ev('ZONE_UNFROZEN', {}, 'zone unfrozen after ' .. tostring(math.floor(dur / 1000)) .. ' s: ' .. tostring(#holds / 2) .. ' held timers resumed, '
+ev('ZONE_UNFROZEN', {}, 'zone unfrozen after ' .. tostring(math.floor(dur / 1000)) .. ' s: ' .. (dropped > 0 and (tostring(dropped) .. ' frozen requests dropped (not processed), ') or '') .. tostring(paused) .. ' frozen requests processed in request order, ' .. tostring(#holds / 2) .. ' held timers resumed, '
   .. tostring(moved) .. ' waiting requests got tickets in request order')
 return {'OK', cjson.encode(p), tostring(moved)}`;

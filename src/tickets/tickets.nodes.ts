@@ -110,7 +110,7 @@ export class TicketsNodes implements OnModuleInit, OnModuleDestroy {
     while (started.length < count) {
       while (used.has(port) || (await portAnswers(port))) port++;
       used.add(port);
-      const name = `node${port - FIRST_PORT + 1}`;
+      const name = `node-${port}`; // by port: never collides with a manually started node1 / node2
       const log = join('logs', `node-${port}.log`);
       const out = openSync(join(process.cwd(), log), 'a');
       const child = spawn(process.execPath, [join(__dirname, '..', 'main.js')], {
