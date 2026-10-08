@@ -1,0 +1,1387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket Booking Console</title>
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --panel-2: #f0f2f5; --text: #1b1f24; --muted: #5d6673;
+  --border: #dde1e6; --accent: #2457d6; --accent-weak: #e6edfc; --ok: #1a7f4b; --ok-weak: #e3f4ea;
+  --warn: #9a6200; --warn-weak: #fdf1dc; --bad: #c0362c; --bad-weak: #fbe6e4; --frz: #6a3fc8; --frz-weak: #efe8fc;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #191d23; --panel-2: #20252c; --text: #e6e9ed; --muted: #98a2ae;
+    --border: #2c333c; --accent: #7aa2ff; --accent-weak: #1d2a47; --ok: #4cc38a; --ok-weak: #15301f;
+    --warn: #e0a640; --warn-weak: #33270f; --bad: #f07167; --bad-weak: #3a1a17; --frz: #b69bff; --frz-weak: #2a2140;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #191d23; --panel-2: #20252c; --text: #e6e9ed; --muted: #98a2ae;
+  --border: #2c333c; --accent: #7aa2ff; --accent-weak: #1d2a47; --ok: #4cc38a; --ok-weak: #15301f;
+  --warn: #e0a640; --warn-weak: #33270f; --bad: #f07167; --bad-weak: #3a1a17; --frz: #b69bff; --frz-weak: #2a2140;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+header .sub { color: var(--muted); font-size: 13px; }
+header .right { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+header a { color: var(--accent); text-decoration: none; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--muted); margin-right: 6px; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+.layout { max-width: 1400px; margin: 0 auto; padding: 20px 24px 60px; }
+@media (max-width: 900px) { .layout { padding: 14px 16px 40px; } }
+.picker { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 16px; }
+.picker label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.picker select { min-width: 200px; font-size: 15px; padding: 8px 10px; }
+.picker .info { font-size: 13px; color: var(--muted); padding-bottom: 8px; font-variant-numeric: tabular-nums; }
+.picker details { margin-left: auto; }
+.picker details[open] { flex-basis: 100%; margin-left: 0; }
+.stack { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--panel-2); margin-top: 6px; }
+.stack > div { height: 100%; }
+.stack .b { background: var(--ok); } .stack .f { background: var(--frz); } .stack .a { background: var(--panel-2); }
+.stack.big { height: 14px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.card h3 { margin: 0 0 4px; font-size: 15px; }
+.card p.desc { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin: 14px 0; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.stat .label { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+.stat .value { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.zhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.zhead h2 { margin: 0; font-size: 20px; }
+.zhead .show { color: var(--muted); }
+button.btn { font: inherit; font-weight: 600; border-radius: 8px; padding: 7px 13px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+button.btn.secondary { background: var(--panel); color: var(--accent); }
+button.btn.danger { background: var(--bad); border-color: var(--bad); }
+button.btn.danger.secondary { background: var(--panel); color: var(--bad); }
+button.btn.small { padding: 3px 9px; font-size: 12.5px; }
+button.btn:disabled { opacity: .5; cursor: not-allowed; }
+input, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; min-width: 0; }
+input:focus, select:focus { outline: 2px solid var(--accent-weak); border-color: var(--accent); }
+.form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+.form label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.form label.full { grid-column: 1 / -1; }
+.form .actions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.out { margin-top: 10px; font-size: 13px; min-height: 18px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 22px 0 14px; overflow-x: auto; }
+.tab { background: none; border: none; padding: 9px 14px; font: inherit; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab .c { font-size: 11.5px; background: var(--panel-2); border-radius: 999px; padding: 1px 7px; margin-left: 5px; font-variant-numeric: tabular-nums; }
+.view { display: none; } .view.active { display: block; }
+.table-wrap { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 9px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); position: sticky; top: 0; z-index: 1; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.t { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+td.rid { font-family: var(--mono); font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.note { color: var(--muted); font-size: 12.5px; min-width: 220px; }
+.empty { color: var(--muted); padding: 26px; text-align: center; }
+.st { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); white-space: nowrap; }
+.st.FROZEN, .st.NO_TICKETS_LEFT { background: var(--frz-weak); color: var(--frz); }
+.st.BOOKED { background: var(--ok-weak); color: var(--ok); }
+.st.WAITING { background: var(--warn-weak); color: var(--warn); }
+.st.DUPLICATE_BLOCKED, .st.EXPIRED, .st.BOOKING_CANCELLED { background: var(--bad-weak); color: var(--bad); }
+.st.RELEASED, .st.CANCELLED { background: var(--accent-weak); color: var(--accent); }
+.how { font-size: 12.5px; }
+.how b { font-weight: 600; }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.toolbar .sp { margin-left: auto; }
+.checks { list-style: none; padding: 0; margin: 0; }
+.checks li { padding: 7px 0; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 22px 1fr; gap: 4px 8px; }
+.checks .ok { color: var(--ok); font-weight: 700; } .checks .no { color: var(--bad); font-weight: 700; }
+.checks .d { grid-column: 2; color: var(--muted); font-size: 12.5px; }
+.banner { padding: 10px 14px; border-radius: 9px; font-weight: 650; margin-bottom: 10px; }
+.banner.pass { background: var(--ok-weak); color: var(--ok); } .banner.fail { background: var(--bad-weak); color: var(--bad); }
+.banner.run { background: var(--accent-weak); color: var(--accent); }
+.badge { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+.badge.ok { background: var(--ok-weak); color: var(--ok); } .badge.warn { background: var(--warn-weak); color: var(--warn); }
+pre.log { max-height: 200px; overflow: auto; font-size: 12px; background: var(--panel-2); padding: 10px; border-radius: 8px; white-space: pre-wrap; font-family: var(--mono); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 13px; }
+.kv div:nth-child(odd) { color: var(--muted); }
+.good { color: var(--ok); } .badc { color: var(--bad); } .warnc { color: var(--warn); } .frzc { color: var(--frz); }
+.toast { position: fixed; right: 20px; bottom: 20px; background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 420px; z-index: 10; }
+.toast.show { opacity: 1; }
+.flow { font-size: 13px; color: var(--muted); margin: 0; padding-left: 18px; }
+.flow li { margin: 2px 0; }
+.fz { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); margin-bottom: 14px; overflow: hidden; }
+.fz > .h { padding: 12px 16px; background: var(--frz-weak); display: flex; gap: 10px 18px; flex-wrap: wrap; align-items: center; }
+.fz > .h b { color: var(--frz); font-size: 15px; }
+.fz > .h .live { color: var(--bad); font-weight: 700; }
+.fz .body { padding: 12px 16px; }
+.fz h4 { margin: 16px 0 6px; font-size: 13.5px; }
+.fz h4 .sub { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+.fz .snap { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.fz .snap > div { background: var(--panel-2); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.fz .snap .k { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.chip { font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); font-variant-numeric: tabular-nums; }
+.chip.f { background: var(--frz-weak); color: var(--frz); } .chip.w { background: var(--warn-weak); color: var(--warn); }
+.chip.o { background: var(--ok-weak); color: var(--ok); } .chip.d { background: var(--bad-weak); color: var(--bad); }
+.fz .table-wrap { max-height: 300px; margin-top: 6px; }
+.summary { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin: 12px 0 0; font-size: 14.5px; line-height: 1.6; }
+.summary b { font-variant-numeric: tabular-nums; }
+.meanings { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px 18px; margin-top: 10px; }
+.meanings div { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.meanings .st { flex: none; min-width: 128px; text-align: center; }
+a[data-open] { color: var(--accent); text-decoration: none; border-bottom: 1px dashed currentColor; cursor: pointer; }
+.dlg { position: fixed; inset: 0; background: rgba(10, 14, 20, .55); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; }
+.dlg.hidden { display: none; }
+.dlg .box { background: var(--panel); color: var(--text); border-radius: 14px; width: min(760px, 100%); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.dlg .top { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: flex-start; }
+.dlg .top h3 { margin: 0; font-size: 18px; }
+.dlg .top .x { margin-left: auto; }
+.dlg .in { padding: 16px 20px 20px; }
+.story { list-style: none; margin: 14px 0 0; padding: 0; border-left: 2px solid var(--border); }
+.story li { position: relative; padding: 0 0 14px 18px; }
+.story li::before { content: ''; position: absolute; left: -7px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+.story li.f::before { border-color: var(--frz); } .story li.w::before { border-color: var(--warn); } .story li.o::before { border-color: var(--ok); background: var(--ok); } .story li.b::before { border-color: var(--bad); }
+.story .when { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.story .what { font-size: 14px; }
+.story .why { font-size: 12.5px; color: var(--muted); }
+.qedit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+.qedit b { margin-right: 4px; }
+.qedit input { width: 90px; }
+.editbox { margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--panel-2); }
+.editbox h4 { margin: 0 0 8px; font-size: 14px; }
+.editbox .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.editbox input { width: 100px; }
+.editbox input.wide { width: 260px; }
+.editbox .rule { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+.rl-entry { border: 1px solid var(--border); border-radius: 9px; background: var(--panel); margin-bottom: 8px; overflow: hidden; }
+.rl-entry > summary { list-style: none; padding: 9px 12px; display: grid; grid-template-columns: 110px 150px minmax(120px, 170px) minmax(0, 1fr) 90px; gap: 10px; align-items: baseline; cursor: pointer; color: var(--text); }
+.rl-entry > summary::-webkit-details-marker { display: none; }
+.rl-entry[open] > summary { background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.rl-entry .t { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.rl-entry .act { font-weight: 650; }
+.rl-entry .res { font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.rl-entry .meta { font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
+.rl-entry .who { font-size: 12px; color: var(--muted); }
+.rl-ops { font-family: var(--mono); font-size: 12px; }
+.rl-ops td { padding: 4px 8px; vertical-align: top; }
+.rl-ops td.k { color: var(--accent); word-break: break-all; }
+.rl-ops td.a, .rl-ops td.r { word-break: break-word; max-width: 360px; }
+.rl-ops tr.lua td:first-child { border-left: 3px solid var(--frz); }
+.tag { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; margin-right: 4px; font-family: system-ui, sans-serif; }
+.tag.w { background: var(--bad-weak); color: var(--bad); } .tag.r { background: var(--panel-2); color: var(--muted); } .tag.l { background: var(--frz-weak); color: var(--frz); }
+.rl-note { padding: 8px 12px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--border); }
+@media (max-width: 800px) { .rl-entry > summary { grid-template-columns: 1fr; gap: 2px; } .rl-entry .meta { text-align: left; } }
+.ltbar { height: 14px; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin: 6px 0; }
+.ltbar > div { height: 100%; background: var(--accent); transition: width .3s; }
+.nodebar { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin-top: 4px; }
+.nodebar > div { height: 100%; background: var(--frz); }
+.phasebox { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-top: 10px; background: var(--panel); }
+.phasebox h4 { margin: 0 0 4px; font-size: 14px; }
+.phasebox.idle { opacity: .55; }
+.zfbanner { display: none; margin-top: 12px; border: 2px solid #2b6cb0; background: #e8f1fb; color: #1d4f8a; border-radius: 12px; padding: 12px 16px; }
+.zfbanner.on { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.zfbanner b.big { font-size: 16px; }
+.zfbanner .how { color: #1d4f8a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .zfbanner { background: #13253b; color: #9cc4f2; border-color: #4f8fd6; } :root:not([data-theme="light"]) .zfbanner .how { color: #9cc4f2; } }
+:root[data-theme="dark"] .zfbanner { background: #13253b; color: #9cc4f2; border-color: #4f8fd6; } :root[data-theme="dark"] .zfbanner .how { color: #9cc4f2; }
+.fz.zone > .h { background: #e8f1fb; }
+.fz.zone > .h b { color: #1d4f8a; }
+:root[data-theme="dark"] .fz.zone > .h { background: #13253b; } :root[data-theme="dark"] .fz.zone > .h b { color: #9cc4f2; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fz.zone > .h { background: #13253b; } :root:not([data-theme="light"]) .fz.zone > .h b { color: #9cc4f2; } }
+.st.ZONE_FROZEN, .st.ZONE_UNFROZEN { background: #e8f1fb; color: #1d4f8a; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Ticket Booking · City &amp; Zone</h1>
+    <div class="sub">Freeze → pay → booked · FIFO waiting line · duplicate requests blocked · Redis atomic scripts</div>
+  </div>
+  <div class="right">
+    <a href="/">← Mumin console</a>
+    <span><span id="conn" class="dot"></span><span id="connText">connecting…</span></span>
+    <label><input type="checkbox" id="auto" checked> auto-refresh</label>
+    <button class="btn small danger secondary" id="clearAll" title="Remove every request, freeze, waiting line and report in ALL zones">Clear all data</button>
+    <button class="btn small secondary" id="themeBtn">Theme</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="card picker">
+    <label>City<select id="pCity"></select></label>
+    <label>Zone<select id="pZone"></select></label>
+    <span class="info" id="pInfo"></span>
+    <details>
+      <summary>Add / edit a zone</summary>
+      <div class="form" style="margin-top:10px">
+        <label>City<input id="nzCity" placeholder="Chennai"></label>
+        <label>Zone<input id="nzName" placeholder="Velachery"></label>
+        <label class="full">Show<input id="nzShow" value="Evening show 7:00 PM"></label>
+        <label>Total tickets<input id="nzTotal" type="number" min="1" value="100"></label>
+        <label>Freeze time (s)<input id="nzHold" type="number" min="5" value="60"></label>
+        <div class="actions"><button class="btn" id="nzSave">Save zone</button></div>
+      </div>
+      <div class="out" id="nzOut"></div>
+    </details>
+  </div>
+
+  <main id="main"><div class="card empty">Pick a city and zone.</div></main>
+</div>
+
+<template id="zoneTpl">
+  <div class="zhead">
+    <h2 id="zTitle"></h2><span class="show" id="zShow"></span>
+    <span class="show" id="zHold"></span>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="label">Total</div><div class="value" id="sTotal"></div></div>
+    <div class="stat"><div class="label">Available</div><div class="value" id="sAvail"></div></div>
+    <div class="stat"><div class="label">Frozen</div><div class="value frzc" id="sFrozen"></div></div>
+    <div class="stat"><div class="label">Booked</div><div class="value good" id="sBooked"></div></div>
+    <div class="stat"><div class="label">Waiting requests</div><div class="value warnc" id="sWaiting"></div></div>
+    <div class="stat"><div class="label">Requests received</div><div class="value" id="sReq"></div></div>
+    <div class="stat"><div class="label">Duplicates blocked</div><div class="value badc" id="sDup"></div></div>
+  </div>
+  <div class="zfbanner" id="zfBanner"></div>
+  <div class="summary" id="zSummary"></div>
+  <div class="qedit">
+    <b>Tickets</b>
+    <input id="qN" type="number" min="1" value="10">
+    <button class="btn small" id="qAdd">+ Add tickets</button>
+    <button class="btn small danger secondary" id="qRemove">− Remove free tickets</button>
+    <span class="how">Added tickets go to the waiting line first (in request order). Only free tickets can be removed.</span>
+    <span class="out" id="qOut" style="margin:0"></span>
+  </div>
+  <div class="stack big" id="zBar" style="margin-top:12px"></div>
+  <div class="legend"><span><i style="background:var(--ok)"></i>booked</span><span><i style="background:var(--frz)"></i>frozen</span><span><i style="background:var(--panel-2);border:1px solid var(--border)"></i>available</span><span id="zCounts"></span></div>
+
+  <div class="grid" style="margin-top:16px">
+    <div class="card">
+      <h3>Book tickets</h3>
+      <p class="desc">Booking is per ITS id (Mumin_ID). Free tickets → frozen for the freeze time, then pay. None free → waits in line. Same request id again, or an ITS id that already has an open request → duplicate, not processed.</p>
+      <div class="form">
+        <label>ITS id (Mumin_ID)<input id="bUser" inputmode="numeric"><span class="how" id="bWho"></span></label>
+        <label>Tickets<input id="bQty" type="number" min="1" max="10" value="2"></label>
+        <label class="full">Request id <input id="bRid"></label>
+        <div class="actions">
+          <button class="btn" id="bBook">Book</button>
+          <button class="btn secondary" id="bNewRid">New request id</button>
+        </div>
+      </div>
+      <div class="out" id="bOut"></div>
+    </div>
+    <div class="card">
+      <h3>Same ITS id · parallel requests</h3>
+      <p class="desc">Fires N booking requests for ONE ITS id at the same instant from this browser (real HTTP, all instances). Only one may be accepted; all others must come back DUPLICATE.</p>
+      <div class="form">
+        <label>ITS id<input id="pIts" inputmode="numeric"></label>
+        <label>Parallel requests<input id="pN" type="number" min="2" max="200" value="20"></label>
+        <label class="full">Request ids<select id="pMode">
+          <option value="diff">all different (double click / two phones)</option>
+          <option value="same">all the same (client retries)</option>
+          <option value="mix">mixed</option>
+        </select></label>
+        <div class="actions"><button class="btn" id="pRun">Fire in parallel</button><button class="btn secondary" id="pPick">Random ITS</button></div>
+      </div>
+      <div class="out" id="pOut"></div>
+    </div>
+    <div class="card">
+      <h3>Freeze whole zone</h3>
+      <p class="desc">While booking is going on: everything except BOOKED tickets is frozen. Free tickets: nobody can take them. Held (unpaid): keep their tickets, cannot pay, timer paused. New requests all join the waiting line. Unfreeze → timers resume, line served in request order.</p>
+      <div class="form">
+        <label class="full">Reason<input id="zfReason" value="Sale paused by admin"></label>
+        <label class="full" style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="zfAllowPay"> held tickets may still pay during the freeze</label>
+        <div class="actions"><button class="btn" id="zfFreeze">Freeze zone</button><button class="btn secondary" id="zfUnfreeze">Unfreeze zone</button></div>
+      </div>
+      <div class="out" id="zfOut"></div>
+    </div>
+    <div class="card">
+      <h3>Admin freeze</h3>
+      <p class="desc">Block free tickets (no time limit). Unfreezing gives them to the waiting line in request order.</p>
+      <div class="form">
+        <label>Tickets<input id="aQty" type="number" min="1" value="10"></label>
+        <label>Reason<input id="aReason" value="VIP quota"></label>
+        <div class="actions"><button class="btn" id="aFreeze">Freeze tickets</button></div>
+      </div>
+      <div class="out" id="aOut"></div>
+    </div>
+    <div class="card">
+      <h3>ITS concurrency burst</h3>
+      <p class="desc">Real ITS ids from Mumin_Mast; each fires several requests at the same instant. Checks: at most one accepted per ITS. "Finish freezes" then pays some, cancels the rest, and the line moves up in order.</p>
+      <div class="form">
+        <label>ITS ids<input id="tReq" type="number" min="1" value="1000"></label>
+        <label>Requests per ITS (same instant)<input id="tUsers" type="number" min="1" max="100" value="5"></label>
+        <label>Same request id %<input id="tDup" type="number" min="0" max="100" value="30"></label>
+        <label>Max tickets / request<input id="tMax" type="number" min="1" max="10" value="4"></label>
+        <div class="actions">
+          <button class="btn" id="tRun">Send burst</button>
+        </div>
+        <label>Pay % of frozen<input id="sPay" type="number" min="0" max="100" value="50"></label>
+        <div class="actions" style="grid-column:auto;align-self:end"><button class="btn secondary" id="sRun">Finish freezes</button></div>
+      </div>
+      <div class="out" id="tOut"></div>
+    </div>
+  </div>
+
+  <details class="card" style="margin-top:16px" open>
+    <summary><b>What each status means</b> · click any request id in the tables below to see its full story</summary>
+    <div class="meanings" id="meanings"></div>
+  </details>
+
+  <nav class="tabs" id="rtabs">
+    <button class="tab" data-v="afreeze">Freezes (zone + admin)<span class="c" id="cAfreeze"></span></button>
+    <button class="tab active" data-v="freeze">Freeze log<span class="c" id="cFreeze"></span></button>
+    <button class="tab" data-v="frozen">Frozen now<span class="c" id="cFrozen"></span></button>
+    <button class="tab" data-v="line">Waiting line<span class="c" id="cLine"></span></button>
+    <button class="tab" data-v="reqs">All requests<span class="c" id="cReqs"></span></button>
+    <button class="tab" data-v="events">Timeline<span class="c" id="cEvents"></span></button>
+    <button class="tab" data-v="its">ITS lookup</button>
+    <button class="tab" data-v="load">Load test · nodes</button>
+    <button class="tab" data-v="redislog">Redis log<span class="c" id="cRlog"></span></button>
+    <button class="tab" data-v="checks">Checks</button>
+    <button class="tab" data-v="settings">Zone settings</button>
+  </nav>
+
+  <section class="view" id="v-afreeze">
+    <p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 10px">Each admin freeze: the zone when it was frozen, every request that came <b>while it was frozen</b> and what happened to it, the waiting requests that got the tickets <b>when it was unfrozen</b>, and the requests that came <b>after</b>.</p>
+    <div id="afOut"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section class="view active" id="v-freeze">
+    <p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 8px">Every freeze: when it happened, which request it was for, how it got the tickets, how long it waited, and what happened next.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Frozen at</th><th class="num">Req #</th><th>Request id</th><th>ITS id</th><th class="num">Tix</th><th>How</th><th class="num">Waited</th><th>Now</th><th>Ended / booked at</th></tr></thead>
+      <tbody id="tbFreeze"></tbody>
+    </table></div>
+  </section>
+
+  <section class="view" id="v-frozen">
+    <div class="table-wrap"><table>
+      <thead><tr><th>Frozen at</th><th class="num">Req #</th><th>Request id</th><th>ITS id</th><th class="num">Tix</th><th>How</th><th class="num">Expires in</th><th></th></tr></thead>
+      <tbody id="tbFrozen"></tbody>
+    </table></div>
+  </section>
+
+  <section class="view" id="v-line">
+    <p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 8px">Served strictly top to bottom: when tickets are freed, #1 gets them first; if #1 needs more than are free, everyone behind waits too.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th class="num">Place</th><th class="num">Req #</th><th>Request id</th><th>ITS id</th><th class="num">Tix</th><th>Requested at</th><th class="num">Waiting for</th><th></th></tr></thead>
+      <tbody id="tbLine"></tbody>
+    </table></div>
+  </section>
+
+  <section class="view" id="v-reqs">
+    <div class="toolbar">
+      <select id="fStatus"><option value="">All statuses</option></select>
+      <input id="fText" placeholder="Search ITS id / name / request id">
+      <span class="sp"></span>
+      <a id="csvLink" class="btn small secondary" style="text-decoration:none" download>Download all (CSV)</a>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th class="num">Req #</th><th>Requested at</th><th>Request id</th><th>ITS id</th><th class="num">Tix</th><th>Status</th><th>Frozen at</th><th>How</th><th>Booked / ended</th><th></th></tr></thead>
+      <tbody id="tbReqs"></tbody>
+    </table></div>
+    <div class="out" id="reqsNote" style="color:var(--muted)"></div>
+  </section>
+
+  <section class="view" id="v-events">
+    <div class="toolbar">
+      <select id="fEvent"><option value="">All events</option></select>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Time</th><th>Event</th><th class="num">Req #</th><th>Request id</th><th>ITS id</th><th class="num">Tix</th><th class="num">Free</th><th class="num">Frozen</th><th class="num">Booked</th><th class="num">Waiting</th><th>Detail</th></tr></thead>
+      <tbody id="tbEvents"></tbody>
+    </table></div>
+  </section>
+
+  <section class="view" id="v-its">
+    <div class="card">
+      <div class="toolbar"><input id="iIts" inputmode="numeric" placeholder="ITS id (Mumin_ID)"><button class="btn" id="iRun">Look up</button><span class="how">every booking request of this ITS id, all cities and zones</span></div>
+      <div id="iOut"><div class="empty">Enter an ITS id.</div></div>
+    </div>
+  </section>
+
+  <section class="view" id="v-load">
+    <div class="grid">
+      <div class="card">
+        <h3>Nodes (API instances)</h3>
+        <p class="desc">Every node registers itself in Redis. Add nodes (new processes on the next free ports) or stop one; the load test always uses every node alive at that moment.</p>
+        <div class="table-wrap" style="max-height:300px"><table>
+          <thead><tr><th>Node</th><th class="num">Requests served</th><th class="num">Memory</th><th class="num">Up</th><th></th></tr></thead>
+          <tbody id="ndRows"></tbody>
+        </table></div>
+        <div class="row" style="margin-top:10px">
+          <label class="how">Add <input id="ndCount" type="number" min="1" max="8" value="2" style="width:60px"> node(s)</label>
+          <button class="btn small" id="ndAdd">+ Add nodes</button>
+          <span class="out" id="ndOut" style="margin:0"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>1 lakh booking load test</h3>
+        <p class="desc">Real HTTP to every live node, on its own zone "Load Test · Zone 1" (your zones are not touched). Each ITS id fires its requests at the same instant to different nodes.</p>
+        <div class="form">
+          <label>Total requests<input id="ltTotal" type="number" value="100000"></label>
+          <label>Concurrency (in flight)<input id="ltConc" type="number" value="400"></label>
+          <label>Real ITS ids<input id="ltIts" type="number" value="20000"></label>
+          <label>Same request id %<input id="ltSame" type="number" value="30"></label>
+          <label>Tickets in the zone<input id="ltTickets" type="number" value="5000"></label>
+          <label>Admin freeze (tickets)<input id="ltAdmin" type="number" value="1000"></label>
+          <label>Unfreeze at (% done)<input id="ltUnfreeze" type="number" value="60"></label>
+          <label>Line rounds (pay 50 %)<input id="ltRounds" type="number" value="3"></label>
+          <label>Zone freeze at (% done, 0 = off)<input id="ltZf" type="number" value="30"></label>
+          <label>Zone unfreeze at (% done)<input id="ltZu" type="number" value="45"></label>
+          <div class="actions"><button class="btn" id="ltStart">Start load test</button><button class="btn danger secondary" id="ltCancel">Cancel</button><button class="btn secondary" id="ltOpen">Open the test zone</button></div>
+        </div>
+        <div class="how" id="ltHint" style="margin-top:8px"></div>
+      </div>
+    </div>
+    <div id="ltOut" style="margin-top:12px"></div>
+  </section>
+
+  <section class="view" id="v-redislog">
+    <p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 8px">Every action and the exact <b>Redis keys</b> it read and wrote, newest first. Click an entry to see each Redis command. Commands marked <span class="tag l">LUA</span> ran inside one atomic script (nothing can happen in between). Also written to the server console and to <code id="rlFile">logs/tickets-redis.log</code>.</p>
+    <div class="toolbar">
+      <select id="rlScope"><option value="zone">This zone</option><option value="all">All zones</option></select>
+      <select id="rlAction"><option value="">All actions</option></select>
+      <input id="rlQ" placeholder="Search key / ITS id / request id" style="min-width:240px">
+      <label class="how"><input type="checkbox" id="rlReads"> also log read-only calls (page refresh, reports)</label>
+      <span class="sp"></span>
+      <button class="btn small secondary" id="rlDownload">Download</button>
+      <button class="btn small danger secondary" id="rlClear">Clear log</button>
+    </div>
+    <div class="how" id="rlMeta" style="margin-bottom:8px"></div>
+    <div id="rlOut"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section class="view" id="v-checks">
+    <div class="card">
+      <div class="toolbar"><button class="btn" id="vRun">Run checks</button><span class="out" id="vMeta" style="margin:0"></span></div>
+      <div id="vOut"><div class="empty">Scans every request of this zone: ticket totals, duplicates, and FIFO order of the waiting line.</div></div>
+    </div>
+  </section>
+
+  <section class="view" id="v-settings">
+    <div class="grid">
+      <div class="card">
+        <h3>Edit this zone</h3>
+        <p class="desc">Every field can be changed. The zone keeps its id, so all its requests and reports stay.</p>
+        <div class="form">
+          <label>City<input id="eCity"></label>
+          <label>Zone name<input id="eName"></label>
+          <label class="full">Show<input id="eShow"></label>
+          <label>Total tickets<input id="eTotal" type="number" min="1"></label>
+          <label>Freeze time (seconds)<input id="eHold" type="number" min="5"></label>
+          <div class="actions"><button class="btn" id="eSave">Save changes</button><button class="btn secondary" id="eUndo">Undo my typing</button></div>
+        </div>
+        <p class="desc" style="margin:8px 0 0">More tickets → the waiting line is served first. Fewer tickets → only free ones can go. A new freeze time applies to new freezes; extend a current freeze from its request (click its id).</p>
+        <div class="out" id="eOut"></div>
+      </div>
+      <div class="card">
+        <h3>How it works</h3>
+        <ol class="flow">
+          <li>Request comes in → request id already seen? <b>duplicate</b>. ITS id already has an open request? <b>duplicate</b>.</li>
+          <li>Nobody waiting and enough free tickets → <b>FROZEN</b> for the freeze time.</li>
+          <li>Otherwise → <b>WAITING</b> at the end of the line (request order).</li>
+          <li>Pay → <b>BOOKED</b>. Cancel → <b>RELEASED</b>. Time runs out → <b>EXPIRED</b>.</li>
+          <li>Freed tickets go to the line head first, then the next, in order.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3>Reset / delete</h3>
+        <p class="desc">Reset clears all requests, freezes and the report for this zone (tickets back to total).</p>
+        <div class="row" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn danger secondary" id="zReset">Reset zone</button>
+          <button class="btn danger" id="zDelete">Delete zone</button>
+        </div>
+        <div class="out" id="zOut"></div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<div class="toast" id="toast"></div>
+<div class="dlg hidden" id="dlg"><div class="box">
+  <div class="top"><div><h3 id="dTitle"></h3><div class="how" id="dSub"></div></div><button class="btn small secondary x" id="dClose">Close</button></div>
+  <div class="in" id="dBody"></div>
+</div></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const STATUSES = ['FROZEN', 'WAITING', 'BOOKED', 'RELEASED', 'EXPIRED', 'CANCELLED', 'BOOKING_CANCELLED'];
+let zones = [], current = null, report = null, view = 'freeze', freezeData = null;
+try { current = localStorage.getItem('tb.zone'); } catch {}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtN = (n) => Number(n ?? 0).toLocaleString('en-IN');
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+const tm = (ms) => { if (!ms) return '—'; const d = new Date(+ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; };
+const dur = (ms) => ms == null ? '—' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} m ${Math.round(ms % 60000 / 1000)} s`;
+const INFO = {
+  FROZEN: ['Frozen · held', 'Tickets are held for this request. It must pay before the freeze time ends.'],
+  WAITING: ['Waiting in line', 'No free tickets for it yet. It waits its turn; the line is served strictly in request order.'],
+  BOOKED: ['Booked · paid', 'Paid. The tickets are sold to this ITS id.'],
+  RELEASED: ['Released', 'The hold was cancelled (by the person, or admin unfroze). Tickets went back: waiting line first.'],
+  EXPIRED: ['Expired · not paid', 'Not paid within the freeze time. Tickets went back: waiting line first.'],
+  CANCELLED: ['Left the line', 'Left the waiting line before getting tickets.'],
+  BOOKING_CANCELLED: ['Booking cancelled', 'A paid booking was cancelled. Tickets went back: waiting line first.'],
+  DUPLICATE_BLOCKED: ['Duplicate blocked', 'Same request id sent again, or this ITS id already has an open request. Not processed.'],
+  NO_TICKETS_LEFT: ['No tickets left', 'Every ticket is frozen or booked. New requests go to the waiting line.'],
+  ZONE_CREATED: ['Zone created', 'The zone was created.'],
+  ZONE_UPDATED: ['Zone changed', 'Total tickets or freeze time was changed.'],
+  ZONE_RESET: ['Report cleared', 'All requests of this zone were cleared.'],
+  EDITED: ['Changed', 'The request was edited: tickets, freeze time or reason.'],
+  ZONE_FROZEN: ['Zone frozen', 'Everything except booked tickets was frozen. New requests join the waiting line; held timers are paused.'],
+  ZONE_UNFROZEN: ['Zone unfrozen', 'Held timers resumed, then the waiting line was served in request order.'],
+};
+const label = (s) => (INFO[s] ? INFO[s][0] : String(s ?? '—'));
+const st = (s) => `<span class="st ${esc(s)}" title="${esc(INFO[s]?.[1] ?? '')}">${esc(label(s))}</span>`;
+const dash = (v) => (v === undefined || v === null || v === '' || Number.isNaN(v) ? '—' : esc(v));
+const dt = (ms) => { if (!ms) return '—'; const d = new Date(+ms); return `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} ${tm(ms)}`; };
+const ridLink = (rid) => rid ? `<a href="#" data-open="${esc(rid)}" title="Click for the full story">${esc(rid)}</a>` : '—';
+let byRid = new Map();
+function ridLabel(rid) {
+  if (!rid) return '—';
+  if (rid === 'ZONE_UPDATED') return 'more tickets added to the zone';
+  if (rid.startsWith('zone-unfreeze:')) return '<b>the zone unfreeze</b>';
+  const r = byRid.get(rid);
+  if (rid.startsWith('admin-')) return `admin unfreeze${r?.note ? ` (${esc(r.note)})` : ''}`;
+  if (r) return `ITS <b>${esc(r.user)}</b>${r.name ? ` ${esc(r.name)}` : ''} (${esc(label(r.status)).toLowerCase()})`;
+  return `request ${ridLink(rid)}`;
+}
+const newRid = () => 'req-' + (crypto.randomUUID ? crypto.randomUUID().slice(0, 13) : Math.random().toString(36).slice(2, 15));
+const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600); };
+
+async function api(method, path, body, headers = {}) {
+  const res = await fetch(path, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined });
+  let data = null; try { data = await res.json(); } catch {}
+  return { status: res.status, data };
+}
+
+const who = (r) => r.kind === 'ADMIN' ? '<b>ADMIN</b>' : `<b>${esc(r.user)}</b>${r.name ? ` <span class="how">${esc(r.name)}</span>` : ''}`;
+let itsPool = [];
+async function randomIts() {
+  if (!itsPool.length) { const r = await api('GET', '/tickets/its-sample?n=50'); itsPool = r.data || []; }
+  return String(itsPool.splice(Math.floor(Math.random() * itsPool.length), 1)[0] ?? '');
+}
+let whoT;
+function lookupName(inp, out) {
+  clearTimeout(whoT);
+  whoT = setTimeout(async () => {
+    const v = inp.value.trim();
+    if (!/^\d+$/.test(v)) { out.textContent = ''; return; }
+    const r = await api('GET', `/tickets/its/${v}`);
+    out.innerHTML = r.status === 200 ? `${esc(r.data.name)} · ${esc(r.data.jamaat)}${r.data.cancelled ? ' · <span class="badc">CANCELLED</span>' : ''}` : '<span class="badc">not in Mumin_Mast</span>';
+  }, 250);
+}
+
+function how(r) {
+  if (r.kind === 'ADMIN') return `<span class="how"><b>Admin freeze</b> · ${dash(r.note)}</span>`;
+  if (r.cause === 'WAITLIST') return `<span class="how"><b>From the waiting line</b> (joined at place ${dash(r.joinPos)}) · tickets freed by ${ridLabel(r.freedBy)}</span>`;
+  if (r.cause === 'DIRECT') return `<span class="how"><b>Straight away</b> · tickets were free and nobody was waiting</span>`;
+  if (r.status === 'WAITING') return `<span class="how">waiting · place <b>${dash(r.position)}</b> in line</span>`;
+  return '<span class="how">—</span>';
+}
+
+function bar(z) {
+  const p = (n) => z.total ? (100 * n / z.total) + '%' : '0';
+  return `<div class="b" style="width:${p(z.booked)}"></div><div class="f" style="width:${p(z.frozen)}"></div>`;
+}
+
+// ---------- city / zone dropdowns ----------
+async function loadZones() {
+  try {
+    const r = await api('GET', '/tickets/zones');
+    zones = r.data || [];
+    $('#conn').className = 'dot ok'; $('#connText').textContent = 'connected';
+  } catch { $('#conn').className = 'dot bad'; $('#connText').textContent = 'API down'; return; }
+  renderPicker();
+  if (current && !zones.find((z) => z.id === current)) selectZone(zones[0]?.id ?? null);
+}
+
+function renderPicker() {
+  const cities = [...new Set(zones.map((z) => z.city))];
+  const cur = zones.find((z) => z.id === current);
+  const city = cur?.city || $('#pCity').value || cities[0];
+  const cityOpts = cities.map((c) => `<option value="${esc(c)}" ${c === city ? 'selected' : ''}>${esc(c)} (${zones.filter((z) => z.city === c).length} zones)</option>`).join('');
+  if ($('#pCity').innerHTML !== cityOpts && document.activeElement !== $('#pCity')) $('#pCity').innerHTML = cityOpts;
+  const zs = zones.filter((z) => z.city === city);
+  const zoneOpts = zs.map((z) => `<option value="${esc(z.id)}" ${z.id === current ? 'selected' : ''}>${esc(z.name)}${z.zoneFrozen ? ' · ❄ FROZEN' : ''} · ${fmtN(z.available)}/${fmtN(z.total)} free${z.waiting ? ` · ${fmtN(z.waiting)} waiting` : ''}</option>`).join('');
+  if ($('#pZone').innerHTML !== zoneOpts && document.activeElement !== $('#pZone')) $('#pZone').innerHTML = zoneOpts;
+  $('#pInfo').textContent = cur ? `${cur.show} · ${fmtN(cur.frozen)} frozen · ${fmtN(cur.booked)} booked · ${fmtN(cur.requests)} requests` : '';
+}
+
+$('#pCity').onchange = () => { const z = zones.find((x) => x.city === $('#pCity').value); selectZone(z?.id ?? null); };
+$('#pZone').onchange = () => selectZone($('#pZone').value);
+
+function selectZone(id) {
+  settingsDirty = false;
+  current = id; report = null; freezeData = null;
+  try { localStorage.setItem('tb.zone', id ?? ''); } catch {}
+  renderPicker();
+  if (!id) { $('#main').innerHTML = '<div class="card empty">Pick a city and zone.</div>'; return; }
+  $('#main').innerHTML = ''; $('#main').append($('#zoneTpl').content.cloneNode(true));
+  wireZone();
+  refresh();
+}
+
+// ---------- zone page ----------
+function wireZone() {
+  $('#bRid').value = newRid();
+  $('#fStatus').innerHTML += STATUSES.map((s) => `<option value="${s}">${label(s)}</option>`).join('');
+  $('#fEvent').innerHTML += ['FROZEN', 'NO_TICKETS_LEFT', 'WAITING', 'BOOKED', 'RELEASED', 'EXPIRED', 'CANCELLED', 'BOOKING_CANCELLED', 'DUPLICATE_BLOCKED', 'EDITED', 'ZONE_FROZEN', 'ZONE_UNFROZEN', 'ZONE_CREATED', 'ZONE_UPDATED', 'ZONE_RESET'].map((s) => `<option value="${s}">${label(s)}</option>`).join('');
+  $('#csvLink').href = `/tickets/zones/${current}/requests.csv`;
+  $('#csvLink').setAttribute('download', `${current}-requests.csv`);
+  document.querySelectorAll('#rtabs .tab').forEach((t) => (t.onclick = () => showView(t.dataset.v)));
+  showView(view);
+  $('#bNewRid').onclick = () => { $('#bRid').value = newRid(); };
+  $('#bBook').onclick = book;
+  $('#zfFreeze').onclick = () => zoneFreezeAction('freeze');
+  $('#zfUnfreeze').onclick = () => zoneFreezeAction('unfreeze');
+  wireRedisLog();
+  wireLoad();
+  $('#bUser').oninput = () => lookupName($('#bUser'), $('#bWho'));
+  $('#pRun').onclick = parallel;
+  $('#pPick').onclick = async () => { $('#pIts').value = await randomIts(); };
+  $('#iRun').onclick = itsLookup;
+  $('#iIts').onkeydown = (e) => { if (e.key === 'Enter') itsLookup(); };
+  randomIts().then((v) => { $('#bUser').value = v; lookupName($('#bUser'), $('#bWho')); });
+  randomIts().then((v) => { $('#pIts').value = v; });
+  $('#aFreeze').onclick = adminFreeze;
+  $('#tRun').onclick = burst;
+  $('#sRun').onclick = settle;
+  $('#vRun').onclick = verify;
+  $('#eSave').onclick = saveSettings;
+  $('#eUndo').onclick = () => { settingsDirty = false; render(); $('#eOut').innerHTML = ''; };
+  ['eCity', 'eName', 'eShow', 'eTotal', 'eHold'].forEach((id) => ($('#' + id).oninput = () => { settingsDirty = true; }));
+  $('#qAdd').onclick = () => changeTickets(1);
+  $('#qRemove').onclick = () => changeTickets(-1);
+  $('#zReset').onclick = resetZone;
+  $('#zDelete').onclick = deleteZone;
+  $('#fStatus').onchange = $('#fText').oninput = renderReqs;
+  $('#fEvent').onchange = renderEvents;
+}
+
+function showView(v) {
+  view = v;
+  if (v === 'afreeze') loadFreezes(true);
+  if (v === 'redislog') loadRedisLog(true);
+  if (v === 'load') loadLoadTab(true);
+  if (v === 'its') itsLookup();
+  document.querySelectorAll('#rtabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.v === v));
+  document.querySelectorAll('#main .view').forEach((s) => s.classList.toggle('active', s.id === 'v-' + v));
+}
+
+async function refresh() {
+  if (!current) return;
+  const id = current;
+  const r = await api('GET', `/tickets/zones/${id}/report?limit=1000`).catch(() => null);
+  if (!r || id !== current) return;
+  if (r.status !== 200) { $('#main').innerHTML = `<div class="card empty">${esc(r.data?.code || r.data?.message || 'zone not found')}</div>`; return; }
+  report = r.data;
+  render();
+  if (view === 'afreeze') loadFreezes();
+  if (view === 'redislog') loadRedisLog();
+  if (view === 'load') loadLoadTab();
+}
+
+function render() {
+  const z = report.zone;
+  byRid = new Map(report.requests.map((r) => [r.rid, r]));
+  for (const r of [...report.frozen, ...report.waiting]) byRid.set(r.rid, r);
+  const dupNote = z.duplicates ? ` <b class="badc">${fmtN(z.duplicates)}</b> duplicate requests were blocked (same request id again, or the ITS id already had an open request).` : ' No duplicates so far.';
+  const zf = z.zoneFreeze;
+  $('#zfBanner').classList.toggle('on', !!z.zoneFrozen);
+  $('#zfBanner').innerHTML = z.zoneFrozen ? `<span><b class="big">❄ ZONE FROZEN</b> since ${tm(zf.at)} (${dur(Date.now() - zf.at)}) · ${esc(zf.reason)}</span>
+    <span class="how">only booked tickets stand · <b>${fmtN(z.available)}</b> free tickets blocked · <b>${fmtN(zf.heldRequests)}</b> held requests ${zf.allowPay ? 'may still pay (timer paused)' : 'cannot pay, timer paused'} · <b>${fmtN(z.waiting)}</b> waiting · new requests join the line</span>
+    <button class="btn small" data-zf="unfreeze">Unfreeze zone</button>` : '';
+  $('#zfFreeze').disabled = !!z.zoneFrozen; $('#zfUnfreeze').disabled = !z.zoneFrozen;
+  $('#zSummary').innerHTML = `<b>${esc(z.city)} · ${esc(z.name)}</b> has <b>${fmtN(z.total)}</b> tickets:
+    <b>${fmtN(z.available)}</b> free, <b class="frzc">${fmtN(z.frozen)}</b> frozen (held, waiting for payment), <b class="good">${fmtN(z.booked)}</b> booked.
+    ${z.waiting ? `<b class="warnc">${fmtN(z.waiting)}</b> requests are waiting in line for tickets.` : 'Nobody is waiting.'}
+    <b>${fmtN(z.requests)}</b> requests received so far.${dupNote} A freeze lasts <b>${dur(z.holdMs)}</b>; if not paid by then, the tickets go back.`;
+  if (!$('#meanings').innerHTML) $('#meanings').innerHTML = [...STATUSES, 'DUPLICATE_BLOCKED'].map((k) => `<div>${st(k)}<span>${esc(INFO[k][1])}</span></div>`).join('');
+  $('#zTitle').textContent = `${z.city} · ${z.name}`;
+  $('#zShow').textContent = z.show;
+  $('#zHold').textContent = `· freeze time ${z.holdMs / 1000} s`;
+  $('#sTotal').textContent = fmtN(z.total);
+  $('#sAvail').textContent = fmtN(z.available);
+  $('#sFrozen').textContent = fmtN(z.frozen);
+  $('#sBooked').textContent = fmtN(z.booked);
+  $('#sWaiting').textContent = fmtN(z.waiting);
+  $('#sReq').textContent = fmtN(z.requests);
+  $('#sDup').textContent = fmtN(z.duplicates);
+  $('#zBar').innerHTML = bar(z);
+  $('#zCounts').textContent = 'requests: ' + (STATUSES.filter((s) => z.counts[s]).map((s) => `${label(s).toLowerCase()} ${fmtN(z.counts[s])}`).join(' · ') || 'none yet');
+  if (!['eTotal', 'eHold', 'eShow', 'eCity', 'eName'].some((id) => document.activeElement === $('#' + id)) && !settingsDirty) {
+    $('#eTotal').value = z.total; $('#eHold').value = z.holdMs / 1000; $('#eShow').value = z.show; $('#eCity').value = z.city; $('#eName').value = z.name;
+  }
+
+  const frozenLog = report.requests.filter((r) => r.frozenAt).sort((a, b) => b.frozenAt - a.frozenAt || b.seq - a.seq);
+  $('#cFreeze').textContent = fmtN(frozenLog.length);
+  $('#tbFreeze').innerHTML = frozenLog.length ? frozenLog.map((r) => `<tr>
+    <td class="t">${tm(r.frozenAt)}</td><td class="num">${r.seq}</td><td class="rid">${ridLink(r.rid)}</td><td>${who(r)}</td><td class="num">${r.qty}</td>
+    <td>${how(r)}</td><td class="num">${r.cause === 'WAITLIST' ? dur(r.frozenAt - r.requestedAt) : '—'}</td><td>${st(r.status)}</td><td class="t">${tm(r.bookedAt || r.endedAt)}</td></tr>`).join('')
+    : '<tr><td colspan="9" class="empty">No freezes yet.</td></tr>';
+
+  $('#cFrozen').textContent = fmtN(report.frozen.length);
+  $('#tbFrozen').innerHTML = report.frozen.length ? report.frozen.map((r) => `<tr>
+    <td class="t">${tm(r.frozenAt)}</td><td class="num">${r.seq}</td><td class="rid">${ridLink(r.rid)}</td><td>${who(r)}</td><td class="num">${r.qty}</td>
+    <td>${how(r)}</td>${report.zone.zoneFrozen && r.expiresAt ? `<td class="num">paused · ${dur(Math.max(0, r.expiresAt - report.zone.zoneFreeze.at))} left</td>` : `<td class="num" data-exp="${r.expiresAt || ''}">${r.expiresAt ? dur(Math.max(0, r.expiresAt - Date.now())) : 'no limit'}</td>`}
+    <td style="white-space:nowrap"><button class="btn small secondary" data-open="${esc(r.rid)}">Edit</button> <button class="btn small" data-act="confirm" data-rid="${esc(r.rid)}">Pay</button>
+      <button class="btn small danger secondary" data-act="release" data-rid="${esc(r.rid)}">${r.kind === 'ADMIN' ? 'Unfreeze' : 'Cancel'}</button></td></tr>`).join('')
+    : '<tr><td colspan="8" class="empty">Nothing frozen right now.</td></tr>';
+
+  $('#cLine').textContent = fmtN(z.waiting);
+  $('#tbLine').innerHTML = report.waiting.length ? report.waiting.map((r) => `<tr>
+    <td class="num"><b>${dash(r.position)}</b></td><td class="num">${r.seq}</td><td class="rid">${ridLink(r.rid)}</td><td>${who(r)}</td><td class="num">${r.qty}</td>
+    <td class="t">${tm(r.requestedAt)}</td><td class="num">${dur(Date.now() - r.requestedAt)}</td>
+    <td style="white-space:nowrap"><button class="btn small secondary" data-open="${esc(r.rid)}">Edit</button> <button class="btn small danger secondary" data-act="release" data-rid="${esc(r.rid)}">Leave line</button></td></tr>`).join('')
+    : '<tr><td colspan="8" class="empty">Nobody is waiting.</td></tr>';
+
+  $('#cReqs').textContent = fmtN(z.requests);
+  renderReqs();
+  $('#cEvents').textContent = fmtN(report.events.length);
+  renderEvents();
+}
+
+function renderReqs() {
+  if (!report) return;
+  const fs = $('#fStatus').value, ft = $('#fText').value.trim().toLowerCase();
+  const rows = report.requests.filter((r) => (!fs || r.status === fs) && (!ft || r.user.toLowerCase().includes(ft) || (r.name || '').toLowerCase().includes(ft) || r.rid.toLowerCase().includes(ft)));
+  $('#tbReqs').innerHTML = rows.length ? rows.slice(0, 1000).map((r) => {
+    const acts = (['FROZEN', 'WAITING', 'BOOKED'].includes(r.status) ? `<button class="btn small secondary" data-open="${esc(r.rid)}">Edit</button> ` : '') + (r.status === 'FROZEN' ? `<button class="btn small" data-act="confirm" data-rid="${esc(r.rid)}">Pay</button> <button class="btn small danger secondary" data-act="release" data-rid="${esc(r.rid)}">Cancel</button>`
+      : r.status === 'WAITING' ? `<button class="btn small danger secondary" data-act="release" data-rid="${esc(r.rid)}">Leave line</button>`
+      : r.status === 'BOOKED' ? `<button class="btn small danger secondary" data-act="release" data-rid="${esc(r.rid)}">Cancel booking</button>` : '');
+    return `<tr><td class="num">${r.seq}</td><td class="t">${tm(r.requestedAt)}</td><td class="rid">${ridLink(r.rid)}</td><td>${who(r)}</td><td class="num">${r.qty}</td>
+      <td>${st(r.status)}${r.status === 'WAITING' ? ` <span class="how">place ${dash(r.position)}</span>` : ''}</td><td class="t">${tm(r.frozenAt)}</td><td>${how(r)}</td><td class="t">${tm(r.bookedAt || r.endedAt)}</td>
+      <td style="white-space:nowrap">${acts}</td></tr>`;
+  }).join('') : '<tr><td colspan="10" class="empty">No requests.</td></tr>';
+  $('#reqsNote').textContent = report.zone.requests > report.requests.length ? `Showing the latest ${fmtN(report.requests.length)} of ${fmtN(report.zone.requests)} requests. Download the CSV for all.` : '';
+}
+
+function renderEvents() {
+  if (!report) return;
+  const f = $('#fEvent').value;
+  const rows = report.events.filter((e) => !f || e.type === f);
+  $('#tbEvents').innerHTML = rows.length ? rows.map((e) => `<tr>
+    <td class="t">${tm(e.ts)}</td><td>${st(e.type)}</td><td class="num">${dash(e.seq)}</td><td class="rid">${ridLink(e.rid)}</td><td>${e.user === 'ADMIN' ? '<b>ADMIN</b>' : dash(e.user)}</td><td class="num">${dash(e.qty)}</td>
+    <td class="num">${esc(e.available)}</td><td class="num">${esc(e.frozen)}</td><td class="num">${esc(e.booked)}</td><td class="num">${esc(e.waiting)}</td><td class="note">${dash(e.note)}</td></tr>`).join('')
+    : '<tr><td colspan="11" class="empty">No events.</td></tr>';
+}
+
+// ---------- admin freeze report ----------
+let freezeFetchedAt = 0;
+async function loadFreezes(force) {
+  if (!current || (!force && Date.now() - freezeFetchedAt < 2500)) return;
+  freezeFetchedAt = Date.now();
+  const id = current;
+  const r = await api('GET', `/tickets/zones/${id}/freezes?limit=20`).catch(() => null);
+  if (!r || r.status !== 200 || id !== current) return;
+  freezeData = r.data;
+  renderFreezes();
+}
+
+function arrival(r) {
+  if (r.kind === 'ADMIN') return '<span class="how"><b>admin freeze</b></span>';
+  if (r.joinPos !== undefined) return `<span class="st WAITING">WAITING</span> <span class="how">line #${r.joinPos}</span>`;
+  if (r.frozenAt !== undefined) return '<span class="st FROZEN">FROZEN</span> <span class="how">tickets were free</span>';
+  return '—';
+}
+function then(r, adminRid) {
+  if (r.joinPos === undefined) return r.status === 'FROZEN' ? 'frozen, not paid yet' : `${st(r.status)} at <span class="t">${tm(r.bookedAt || r.endedAt)}</span>`;
+  if (r.status === 'WAITING') return `still waiting · place <b>${dash(r.position)}</b>`;
+  if (r.status === 'CANCELLED' && !r.frozenAt) return `left the line at <span class="t">${tm(r.endedAt)}</span>`;
+  const by = r.freedBy === adminRid ? `<b class="frzc">this unfreeze</b>` : ridLabel(r.freedBy);
+  return `got tickets at <span class="t">${tm(r.frozenAt)}</span> (waited ${dur(r.frozenAt - r.requestedAt)}) · freed by ${by}`;
+}
+function reqTable(rows, adminRid, empty) {
+  if (!rows.length) return `<div class="how" style="padding:6px 0">${empty}</div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Came at</th><th class="num">Req #</th><th>Request id</th><th>ITS id</th><th class="num">Tix</th><th>On arrival</th><th>What happened next</th><th>Now</th></tr></thead><tbody>${rows.map((r) => `<tr>
+    <td class="t">${tm(r.requestedAt)}</td><td class="num">${r.seq}</td><td class="rid">${ridLink(r.rid)}</td><td>${who(r)}</td><td class="num">${r.qty}</td>
+    <td>${arrival(r)}</td><td class="how">${then(r, adminRid)}</td><td>${st(r.status)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function snapLine(e) {
+  return e ? `${fmtN(e.available)} free · ${fmtN(e.frozen)} frozen · ${fmtN(e.booked)} booked · ${fmtN(e.waiting)} waiting` : '—';
+}
+
+function renderFreezes() {
+  if (!freezeData || !$('#afOut')) return;
+  const list = freezeData.freezes;
+  const zl = freezeData.zoneFreezes || [];
+  $('#cAfreeze').textContent = fmtN(list.length + zl.length);
+  const zoneHtml = zl.map((f) => {
+    const d = f.during, snapA = f.atFreeze, snapB = f.atUnfreeze;
+    return `<div class="fz zone">
+      <div class="h">
+        <b>❄ Zone frozen · everything except booked</b>
+        <span>at <span class="t">${tm(f.at)}</span></span>
+        <span class="how">reason: ${esc(f.reason)} · held tickets ${f.allowPay ? 'could still pay' : 'could not pay'}</span>
+        ${f.active ? `<span class="live">● STILL FROZEN · ${dur(f.durationMs)}</span> <button class="btn small" data-zf="unfreeze">Unfreeze zone</button>`
+          : `<span>unfrozen at <span class="t">${tm(f.endedAt)}</span> · lasted <b>${dur(f.durationMs)}</b> · ${fmtN(f.timersResumed || 0)} held timers resumed</span>`}
+      </div>
+      <div class="body">
+        <div class="snap">
+          <div><div class="k">At the freeze</div>${fmtN(snapA.booked)} booked (stay) · ${fmtN(snapA.available)} free → blocked · ${fmtN(snapA.heldRequests)} held → paused · ${fmtN(snapA.waiting)} waiting</div>
+          <div><div class="k">${f.active ? 'Now' : 'Right after the unfreeze (line served)'}</div>${f.active ? snapLine(report?.zone) : snapLine(snapB)}</div>
+        </div>
+        <div class="chips" style="margin-top:10px"><span class="chip ${f.gotTicketsWhileFrozen ? 'd' : 'o'}">${f.gotTicketsWhileFrozen ? '✗' : '✓'} ${fmtN(f.gotTicketsWhileFrozen)} requests got tickets while frozen (must be 0)</span></div>
+        <h4>1 · Requests that came while the zone was frozen <span class="sub">(${tm(f.at)} → ${f.active ? 'now' : tm(f.endedAt)})</span></h4>
+        <div class="chips">
+          <span class="chip">${fmtN(d.total)} came</span>
+          <span class="chip w">${fmtN(d.wentToLine)} went to the waiting line</span>
+          <span class="chip f">${fmtN(d.servedOnUnfreeze)} got tickets on the unfreeze</span>
+          <span class="chip w">${fmtN(d.stillWaiting)} still waiting</span>
+        </div>
+        ${reqTable(d.requests, `zone-unfreeze:${f.id}`, 'No requests came while the zone was frozen.')}
+        <h4>2 · On unfreeze: who got tickets <span class="sub">(waiting line, top first, in request order)</span></h4>
+        ${f.active ? '<div class="how">Not unfrozen yet. Then held timers resume and the line is served from the top.</div>' : reqTable(f.served, `zone-unfreeze:${f.id}`, 'Nobody fitted the free tickets (or nobody was waiting).')}
+        <h4>3 · Requests after the unfreeze</h4>
+        ${f.active ? '<div class="how">Still frozen.</div>' : `<div class="chips"><span class="chip">${fmtN(f.after.total)} came</span><span class="chip f">${fmtN(f.after.frozenOnArrival)} got free tickets right away</span><span class="chip w">${fmtN(f.after.wentToLine)} went to the line</span></div>${reqTable(f.after.requests, '', 'No requests after the unfreeze yet.')}`}
+      </div>
+    </div>`;
+  }).join('');
+  if (!list.length) { $('#afOut').innerHTML = zoneHtml + (zl.length ? '' : '<div class="card empty">No freezes yet. Use "Freeze whole zone" or "Admin freeze" above.</div>'); return; }
+  const opened = new Set([...document.querySelectorAll('#afOut details[open]')].map((d) => d.dataset.k));
+  const closed = new Set([...document.querySelectorAll('#afOut details:not([open])')].map((d) => d.dataset.k));
+  const pos = new Map((report?.waiting || []).map((w) => [w.rid, w.position]));
+  $('#afOut').innerHTML = zoneHtml + list.map((f, i) => {
+    const a = f.freeze, d = f.during;
+    for (const r of [...d.requests, ...f.after.requests]) if (pos.has(r.rid)) r.position = pos.get(r.rid);
+    const k = (n) => `${a.rid}:${n}`;
+    const det = (n, title, body, dflt) => {
+      const isOpen = opened.has(k(n)) || (!closed.has(k(n)) && dflt && i === 0);
+      return `<details data-k="${k(n)}" ${isOpen ? 'open' : ''}><summary>${title}</summary>${body}</details>`;
+    };
+    const z = report?.zone;
+    return `<div class="fz">
+      <div class="h">
+        <b>${fmtN(a.qty)} tickets frozen by admin</b>
+        <span>at <span class="t">${tm(f.start)}</span></span>
+        <span class="how">reason: ${esc(a.note)}</span>
+        ${f.active ? `<span class="live">● STILL FROZEN · ${dur(f.durationMs)}</span> <button class="btn small danger secondary" data-act="release" data-rid="${esc(a.rid)}">Unfreeze now</button>`
+          : `<span>${a.status === 'BOOKED' ? 'sold' : 'unfrozen'} at <span class="t">${tm(f.end)}</span> · lasted <b>${dur(f.durationMs)}</b></span>`}
+        <span class="how" style="margin-left:auto"><code>${esc(a.rid)}</code></span>
+      </div>
+      <div class="body">
+        <div class="snap">
+          <div><div class="k">Right after the freeze</div>${snapLine(f.atFreeze)}</div>
+          <div><div class="k">${f.active ? 'Now' : 'Right after the unfreeze (line served)'}</div>${f.active ? snapLine(z) : snapLine(f.atEnd)}</div>
+        </div>
+
+        <h4>1 · Requests that came while it was frozen <span class="sub">(${tm(f.start)} → ${f.active ? 'now' : tm(f.end)})</span></h4>
+        <div class="chips">
+          <span class="chip">${fmtN(d.total)} came</span>
+          <span class="chip f">${fmtN(d.frozenOnArrival)} got free tickets right away</span>
+          <span class="chip w">${fmtN(d.wentToLine)} went to the waiting line</span>
+          <span class="chip f">${fmtN(d.servedByThisUnfreeze)} got tickets from this unfreeze</span>
+          <span class="chip o">${fmtN(d.servedLater - d.servedByThisUnfreeze)} got tickets freed by others</span>
+          <span class="chip w">${fmtN(d.stillWaiting)} still waiting</span>
+          <span class="chip">${fmtN(d.leftLine)} left the line</span>
+          <span class="chip d">${fmtN(d.duplicatesBlocked)} duplicates blocked</span>
+        </div>
+        ${det('during', `Show the ${fmtN(d.total)} requests${d.total > d.requests.length ? ` (first ${d.requests.length})` : ''}`, reqTable(d.requests, a.rid, 'No requests came while it was frozen.'), true)}
+        ${f.duplicates.length ? det('dups', `Show the ${fmtN(d.duplicatesBlocked)} duplicates blocked`, `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Request id</th><th>ITS id</th><th class="num">Tix</th><th>Why blocked</th></tr></thead><tbody>${f.duplicates.map((e) => `<tr><td class="t">${tm(e.ts)}</td><td class="rid">${ridLink(e.rid)}</td><td>${dash(e.user)}</td><td class="num">${dash(e.qty)}</td><td class="note">${esc(e.note)}</td></tr>`).join('')}</tbody></table></div>`) : ''}
+
+        <h4>2 · On unfreeze: who got the ${fmtN(a.qty)} tickets <span class="sub">(waiting line, top first, in request order)</span></h4>
+        ${f.active ? '<div class="how">Not unfrozen yet. When it is, its tickets go to the waiting line from the top, in request order.</div>'
+          : a.status === 'BOOKED' ? '<div class="how">These tickets were sold (paid), so nothing went back to the line.</div>'
+          : reqTable(f.served, a.rid, 'Nobody was waiting (or #1 in line needed more tickets), so the tickets went back to free.')}
+
+        <h4>3 · Requests that came after the unfreeze <span class="sub">${f.active ? '' : `(from ${tm(f.end)})`}</span></h4>
+        ${f.active ? '<div class="how">Still frozen.</div>' : `<div class="chips">
+          <span class="chip">${fmtN(f.after.total)} came</span>
+          <span class="chip f">${fmtN(f.after.frozenOnArrival)} got free tickets right away</span>
+          <span class="chip w">${fmtN(f.after.wentToLine)} went to the waiting line (behind earlier requests)</span>
+        </div>${det('after', `Show the ${fmtN(f.after.total)} requests${f.after.total > f.after.requests.length ? ` (first ${f.after.requests.length})` : ''}`, reqTable(f.after.requests, a.rid, 'No requests after the unfreeze yet.'), true)}`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- request details (full story) ----------
+function storyOf(d) {
+  const r = d.request, q = `${r.qty} ticket${r.qty > 1 ? 's' : ''}`;
+  const items = [];
+  const add = (cls, when, what, why = '') => items.push(`<li class="${cls}"><div class="when">${dt(when)}</div><div class="what">${what}</div>${why ? `<div class="why">${why}</div>` : ''}</li>`);
+  if (r.kind === 'ADMIN') {
+    add('f', r.frozenAt, `Admin froze <b>${q}</b>`, `Reason: ${dash(r.note)}. Admin freezes have no time limit.`);
+  } else {
+    add('', r.requestedAt, `Request received for <b>${q}</b> · request order <b>#${r.seq}</b>`, `ITS ${esc(r.user)}${r.name ? ` (${esc(r.name)})` : ''} · request id ${esc(r.rid)}`);
+    if (r.joinPos !== undefined) add('w', r.requestedAt, r.duringZoneFreeze ? `The zone was frozen → joined the <b>waiting line at place ${r.joinPos}</b>` : `Not enough free tickets → joined the <b>waiting line at place ${r.joinPos}</b>`, r.duringZoneFreeze ? 'While a zone is frozen nobody gets tickets; the line is served in request order after the unfreeze.' : 'Waiting requests are served strictly in request order; nobody can overtake.');
+    if (r.status === 'WAITING') add('w', Date.now(), `Still waiting · now at place <b>${dash(r.position)}</b> in line`, 'It gets tickets as soon as enough are freed for everyone ahead of it and then for it.');
+    if (r.frozenAt !== undefined && r.cause === 'DIRECT') add('f', r.frozenAt, `Tickets were free → <b>${q} frozen</b> for this request`, 'Nobody was waiting, so it got them straight away.');
+    if (r.frozenAt !== undefined && r.cause === 'WAITLIST') {
+      const by = d.freedBy ? (d.freedBy.kind === 'ZONE' ? 'the zone was unfrozen' : d.freedBy.kind === 'ADMIN' ? `the admin unfroze ${d.freedBy.qty} tickets (${dash(d.freedBy.note)})` : `ITS ${esc(d.freedBy.user)}${d.freedBy.name ? ` (${esc(d.freedBy.name)})` : ''} gave back ${d.freedBy.qty} tickets`) : 'tickets were freed';
+      add('f', r.frozenAt, `Served from the line → <b>${q} frozen</b> after waiting ${dur(r.frozenAt - r.requestedAt)}`, `Because ${by}.`);
+    }
+  }
+  if (r.status === 'FROZEN' && r.expiresAt) add('f', r.expiresAt, `Must pay before this time (${dur(Math.max(0, r.expiresAt - Date.now()))} left)`, 'If not paid by then, the freeze expires and the tickets go to the waiting line.');
+  if (r.bookedAt) add('o', r.bookedAt, `Paid → <b>${q} booked</b>`);
+  if (r.edits) add('', r.editedAt, `Edited ${r.edits} time${r.edits > 1 ? 's' : ''} · last change: <b>${esc(r.lastEdit)}</b>`, 'Every change is also in the Timeline tab.');
+  const ended = { RELEASED: r.kind === 'ADMIN' ? 'Admin unfroze the tickets' : 'Hold cancelled before payment', EXPIRED: 'Not paid within the freeze time → freeze expired', CANCELLED: 'Left the waiting line', BOOKING_CANCELLED: 'Paid booking was cancelled' }[r.status];
+  if (ended && r.endedAt) {
+    const to = d.gaveTo.length ? `Its tickets went to the waiting line, in order: ${d.gaveTo.map((x) => `ITS ${esc(x.user)}${x.name ? ` ${esc(x.name)}` : ''} (${x.qty})`).join(', ')}.` : (r.status === 'CANCELLED' ? 'It never held tickets.' : 'Nobody was waiting who fitted, so the tickets became free again.');
+    add('b', r.endedAt, `${ended}`, to);
+  }
+  return items.join('');
+}
+
+async function openDetails(rid) {
+  const r = await api('GET', `/tickets/requests/${encodeURIComponent(rid)}/details`);
+  if (r.status !== 200) { toast(`${rid}: ${r.data?.code || r.status}`); return; }
+  const d = r.data, q = d.request;
+  $('#dTitle').innerHTML = q.kind === 'ADMIN' ? 'Admin freeze' : `ITS ${esc(q.user)}${q.name ? ` · ${esc(q.name)}` : ''}`;
+  $('#dSub').innerHTML = `${esc(d.zone.city)} · ${esc(d.zone.name)}${d.zone.show ? ` · ${esc(d.zone.show)}` : ''}${q.jamaat ? ` · Jamaat: ${esc(q.jamaat)}` : ''}`;
+  $('#dBody').innerHTML = `<div class="kv">
+      <div>Status now</div><div>${st(q.status)} <span class="how">${esc(INFO[q.status]?.[1] ?? '')}</span></div>
+      <div>Tickets</div><div><b>${q.qty}</b></div>
+      <div>Request id</div><div><code>${esc(q.rid)}</code></div>
+      <div>Request order</div><div>#${q.seq} (lower number = came earlier)</div>
+      ${q.kind === 'USER' ? `<div>Duplicates blocked</div><div>${d.itsDuplicatesInZone ? `<b class="badc">${d.itsDuplicatesInZone}</b> extra requests from this ITS id in this zone were blocked` : 'none from this ITS id in this zone'}</div>` : ''}
+    </div>
+    <div style="margin-top:10px"><button class="btn small secondary" data-rlog="${esc(q.rid)}">Show Redis keys for this request</button></div>
+    ${editBox(q)}
+    <h4 style="margin:18px 0 0">What happened, step by step</h4>
+    <ol class="story">${storyOf(d)}</ol>`;
+  $('#dlg').classList.remove('hidden');
+  $('#dlg').dataset.rid = q.rid; $('#dlg').dataset.zone = q.zone;
+}
+
+function editBox(q) {
+  const qty = (rule) => `<div class="row"><label>Tickets <input id="xQty" type="number" min="1" value="${q.qty}"></label><button class="btn small" data-edit="qty">Save tickets</button></div><div class="rule">${rule}</div>`;
+  let body = '';
+  if (q.status === 'FROZEN') {
+    body = qty(q.kind === 'ADMIN' ? 'Lower → freed tickets go to the waiting line in order. Higher → taken from free tickets.' : 'Lower → freed tickets go to the waiting line in order. Higher → only if tickets are free and nobody is waiting.');
+    if (q.kind === 'USER') body += `<div class="row"><span>Extend freeze:</span><button class="btn small secondary" data-edit="ext" data-s="60">+1 min</button><button class="btn small secondary" data-edit="ext" data-s="300">+5 min</button><button class="btn small secondary" data-edit="ext" data-s="900">+15 min</button></div>`;
+    else body += `<div class="row"><label>Reason <input id="xNote" class="wide" value="${esc(q.note ?? '')}"></label><button class="btn small" data-edit="note">Save reason</button></div>`;
+    body += `<div class="row"><button class="btn small" data-edit="pay">Pay → book</button><button class="btn small danger secondary" data-edit="release">${q.kind === 'ADMIN' ? 'Unfreeze' : 'Cancel the freeze'}</button></div>`;
+  } else if (q.status === 'WAITING') {
+    body = qty('Keeps its place in line. If the new number fits the free tickets and it is first in line, it gets them now.') + '<div class="row"><button class="btn small danger secondary" data-edit="release">Leave the line</button></div>';
+  } else if (q.status === 'BOOKED') {
+    body = qty('Can only go lower (partial cancel). Freed tickets go to the waiting line in order.') + '<div class="row"><button class="btn small danger secondary" data-edit="release">Cancel the whole booking</button></div>';
+  } else {
+    body = '<div class="rule">This request is finished, so there is nothing to change. Book again for new tickets.</div>';
+  }
+  return `<div class="editbox"><h4>Change this request</h4>${body}<div class="out" id="xOut"></div></div>`;
+}
+
+$('#dlg').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-edit]');
+  if (!b) return;
+  const rid = $('#dlg').dataset.rid, zone = $('#dlg').dataset.zone, base = `/tickets/zones/${zone}/requests/${encodeURIComponent(rid)}`;
+  b.disabled = true;
+  const kind = b.dataset.edit;
+  const r = kind === 'qty' ? await api('PATCH', base, { qty: Math.floor(+$('#xQty').value) })
+    : kind === 'ext' ? await api('PATCH', base, { extendSeconds: +b.dataset.s })
+    : kind === 'note' ? await api('PATCH', base, { note: $('#xNote').value })
+    : kind === 'pay' ? await api('POST', base + '/confirm')
+    : await api('POST', base + '/release', { reason: 'changed from the request details' });
+  const msg = r.status === 200
+    ? `<span class="good"><b>Done</b></span>${r.data.request?.lastEdit && kind !== 'pay' && kind !== 'release' ? ` · ${esc(r.data.request.lastEdit)}` : ` · now ${esc(label(r.data.request?.status))}`}${r.data.movedFromLine ? ` · <b class="frzc">${r.data.movedFromLine}</b> waiting request(s) got tickets` : ''}`
+    : errText(r.data);
+  freezeFetchedAt = 0; refresh(); loadZones();
+  await openDetails(rid);
+  $('#xOut').innerHTML = msg;
+});
+document.addEventListener('click', (e) => {
+  const lg = e.target.closest('[data-rlog]');
+  if (lg) { $('#dlg').classList.add('hidden'); $('#rlScope').value = 'all'; $('#rlAction').value = ''; $('#rlQ').value = lg.dataset.rlog; showView('redislog'); return; }
+  const a = e.target.closest('[data-open]');
+  if (a) { e.preventDefault(); openDetails(a.dataset.open); }
+});
+$('#dClose').onclick = () => $('#dlg').classList.add('hidden');
+$('#dlg').addEventListener('click', (e) => { if (e.target.id === 'dlg') $('#dlg').classList.add('hidden'); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#dlg').classList.add('hidden'); });
+
+// ---------- Redis key log ----------
+const WRITE_CMDS = new Set(['SET', 'HSET', 'HDEL', 'HINCRBY', 'RPUSH', 'LPUSH', 'LPOP', 'LREM', 'ZADD', 'ZREM', 'XADD', 'INCR', 'DEL', 'UNLINK', 'SADD', 'SREM', 'MULTI', 'EXEC', 'HPEXPIRE', 'PEXPIRE']);
+const ACTIONS = ['book', 'zone-freeze', 'zone-unfreeze', 'admin-freeze', 'pay', 'cancel-or-unfreeze', 'edit-request', 'edit-zone', 'create-zone', 'expire-freezes', 'finish-freezes', 'burst-test', 'reset-zone', 'clear-all-data', 'delete-zone', 'create-default-zones', 'zone-report', 'admin-freeze-report', 'request-details', 'its-lookup', 'run-checks', 'list-zones'];
+let rlData = null, rlFetchedAt = 0;
+async function loadRedisLog(force) {
+  if (!force && Date.now() - rlFetchedAt < 1500) return;
+  rlFetchedAt = Date.now();
+  const qs = new URLSearchParams({ limit: '200' });
+  if ($('#rlScope').value === 'zone' && current) qs.set('zone', current);
+  if ($('#rlAction').value) qs.set('action', $('#rlAction').value);
+  if ($('#rlQ').value.trim()) qs.set('q', $('#rlQ').value.trim());
+  const r = await api('GET', '/tickets/redis-log?' + qs);
+  if (r.status !== 200) return;
+  rlData = r.data;
+  renderRedisLog();
+}
+function opRow(o, i) {
+  const base = String(o.c).split(' ')[0];
+  const w = WRITE_CMDS.has(base), script = base === 'EVALSHA' || base === 'EVAL';
+  return `<tr class="${o.lua ? 'lua' : ''}"><td class="num">${i + 1}</td><td>${o.lua ? `<span class="tag l" title="inside atomic script ${esc(o.lua)}">LUA</span>` : ''}${script ? '<span class="tag l" title="runs the commands below as one atomic step">SCRIPT</span>' : `<span class="tag ${w ? 'w' : 'r'}">${w ? 'WRITE' : 'READ'}</span>`}</td>
+    <td><b>${esc(o.c)}</b></td><td class="k">${dash(o.k)}</td><td class="a">${dash(o.a)}</td><td class="r">→ ${dash(o.r)}</td></tr>`;
+}
+function renderRedisLog() {
+  if (!rlData || !$('#rlOut')) return;
+  $('#rlReads').checked = !!rlData.logReads;
+  $('#rlFile').textContent = rlData.file || 'logs/tickets-redis.log';
+  const list = rlData.entries;
+  $('#cRlog').textContent = fmtN(rlData.total);
+  $('#rlMeta').textContent = `Showing ${fmtN(list.length)} of ${fmtN(rlData.total)} logged actions (all instances share this log).`;
+  const open = new Set([...document.querySelectorAll('#rlOut details[open]')].map((d) => d.dataset.id));
+  $('#rlOut').innerHTML = list.length ? list.map((e) => {
+    const writes = e.ops.filter((o) => WRITE_CMDS.has(String(o.c).split(' ')[0])).length;
+    const keys = [...new Set(e.ops.flatMap((o) => String(o.k || '').split(' ')).filter((k) => k && !k.startsWith('+') && k !== 'more'))].sort();
+    return `<details class="rl-entry" data-id="${esc(e.id)}" ${open.has(e.id) ? 'open' : ''}>
+      <summary>
+        <span class="t">${tm(e.ts)}</span>
+        <span><span class="act">${esc(e.action)}</span>${e.kind === 'read' ? ' <span class="tag r">read-only</span>' : ''}<div class="who">${esc(e.instance)}</div></span>
+        <span class="who">${e.zone ? esc(e.zone) : 'all zones'}${e.its ? `<br>ITS <b>${esc(e.its)}</b>` : ''}${e.rid ? `<br>${ridLink(e.rid)}` : ''}</span>
+        <span class="res">${esc(e.result)}</span>
+        <span class="meta">${e.ms} ms<br>${e.ops.length} cmds · ${writes} writes</span>
+      </summary>
+      ${e.note ? `<div class="rl-note">${esc(e.note)}</div>` : ''}
+      ${keys.length ? `<div class="rl-note"><b>Keys touched (${keys.length}):</b> <code>${keys.map(esc).join('</code> · <code>')}</code></div>` : ''}
+      ${e.ops.length ? `<div class="table-wrap" style="border:none;border-radius:0;max-height:420px"><table class="rl-ops"><thead><tr><th class="num">#</th><th>Where</th><th>Command</th><th>Key</th><th>Arguments</th><th>Redis replied</th></tr></thead><tbody>${e.ops.map(opRow).join('')}</tbody></table></div>` : ''}
+    </details>`;
+  }).join('') : '<div class="card empty">No logged actions yet. Book, freeze, pay, cancel or edit something and it appears here with its Redis keys.</div>';
+}
+function wireRedisLog() {
+  $('#rlAction').innerHTML += ACTIONS.map((a) => `<option>${a}</option>`).join('');
+  $('#rlScope').onchange = $('#rlAction').onchange = () => loadRedisLog(true);
+  let qt; $('#rlQ').oninput = () => { clearTimeout(qt); qt = setTimeout(() => loadRedisLog(true), 300); };
+  $('#rlReads').onchange = async () => { await api('POST', '/tickets/redis-log/settings', { reads: $('#rlReads').checked }); toast($('#rlReads').checked ? 'Read-only calls are now logged too (busy!)' : 'Only actions that change data are logged'); loadRedisLog(true); };
+  let clearArm = 0;
+  $('#rlClear').onclick = async () => {
+    if (Date.now() - clearArm > 4000) { clearArm = Date.now(); $('#rlClear').textContent = 'Click again to clear the log'; setTimeout(() => ($('#rlClear').textContent = 'Clear log'), 4000); return; }
+    clearArm = 0; await api('POST', '/tickets/redis-log/clear'); $('#rlClear').textContent = 'Clear log'; toast('Redis log cleared'); loadRedisLog(true);
+  };
+  $('#rlDownload').onclick = async () => {
+    const qs = new URLSearchParams({ limit: '3000' });
+    if ($('#rlScope').value === 'zone' && current) qs.set('zone', current);
+    const r = await api('GET', '/tickets/redis-log?' + qs);
+    const blob = new Blob([(r.data?.entries || []).map((e) => JSON.stringify(e)).join('\n')], { type: 'application/x-ndjson' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `redis-log-${$('#rlScope').value === 'zone' ? current : 'all'}.jsonl`; a.click();
+  };
+}
+
+// ---------- nodes + load test ----------
+let loadFetchedAt = 0;
+async function loadLoadTab(force) {
+  if (!force && Date.now() - loadFetchedAt < 900) return;
+  loadFetchedAt = Date.now();
+  const [n, t] = await Promise.all([api('GET', '/tickets/nodes'), api('GET', '/tickets/loadtest/status')]);
+  if (n.status === 200) renderNodes(n.data);
+  if (t.status === 200) renderLoad(t.data);
+}
+function renderNodes(d) {
+  const max = Math.max(1, ...d.nodes.map((x) => x.served));
+  $('#ndRows').innerHTML = d.nodes.map((x) => `<tr>
+      <td><b>${esc(x.instance)}</b>${x.instance === d.self ? ' <span class="badge ok">this page</span>' : ''}<div class="how">pid ${x.pid}${x.startedBy ? ` · started by ${esc(x.startedBy)}` : ''}</div></td>
+      <td class="num">${fmtN(x.served)}<div class="nodebar"><div style="width:${(100 * x.served / max).toFixed(1)}%"></div></div></td>
+      <td class="num">${x.rssMb} MB</td><td class="num">${dur(Date.now() - x.startedAt)}</td>
+      <td>${x.instance === d.self ? '' : `<button class="btn small danger secondary" data-stop="${esc(x.instance)}">Stop</button>`}</td></tr>`).join('')
+    + d.starting.map((x) => `<tr><td><b>${esc(x.instance)}</b> <span class="badge warn">starting…</span></td><td class="num">—</td><td class="num">—</td><td class="num">${dur(Date.now() - x.at)}</td><td></td></tr>`).join('')
+    || '<tr><td colspan="5" class="empty">No nodes.</td></tr>';
+  $('#ltHint').textContent = `The test will use ${d.nodes.length} live node(s): ${d.nodes.map((x) => x.port).join(', ')}.`;
+}
+function renderLoad(s) {
+  const out = $('#ltOut');
+  if (!s || s.status === 'none') { out.innerHTML = '<div class="card empty">No load test has run yet.</div>'; return; }
+  const running = s.status === 'running';
+  $('#ltStart').disabled = running; $('#ltCancel').disabled = !running;
+  const p1 = s.phases.P1 || {}, p2 = s.phases.P2 || {}, r1 = s.metrics['P1.result'], setup = s.metrics['P0.setup'], uf = s.metrics['P1.unfreeze'], zfm = s.metrics['P1.zoneFreeze'];
+  const done = p1.done || 0, total = p1.total || s.params.total, el = (p1.elapsedMs || 1) / 1000;
+  const oc = p1.outcomes || {}, per = p1.perNode || {}, maxN = Math.max(1, ...Object.values(per));
+  const banner = running ? `<div class="banner run">Running · ${esc(s.phases[s.phase]?.title || s.phase || 'starting')}</div>`
+    : `<div class="banner ${s.status === 'passed' ? 'pass' : 'fail'}">${s.status === 'passed' ? 'PASSED' : s.status.toUpperCase()} · ${fmtN(s.params.total)} requests over ${s.nodes.length} node(s)${s.end?.totalSeconds ? ` in ${s.end.totalSeconds} s` : ''}${s.error ? ` · ${esc(s.error)}` : ''}</div>`;
+  out.innerHTML = banner + `
+    <div class="phasebox ${s.phases.P0 ? '' : 'idle'}"><h4>P0 · Setup</h4><div class="how">${setup ? `${fmtN(setup.its)} real ITS ids from Mumin_Mast · zone with ${fmtN(setup.tickets)} tickets · admin froze ${fmtN(setup.adminFrozen)} · freeze time ${setup.freezeTimeS / 60} min (nothing expires during the test)` : 'waiting…'}</div></div>
+    <div class="phasebox ${s.phases.P1 ? '' : 'idle'}"><h4>P1 · ${esc(p1.title || 'Booking requests')}</h4>
+      <div class="ltbar"><div style="width:${(100 * done / total).toFixed(1)}%"></div></div>
+      <div class="how"><b>${fmtN(done)}</b> / ${fmtN(total)} answered · ${fmtN(Math.round(done / el))} req/s · ${el.toFixed(1)} s${r1 ? ` · latency p50 ${r1.latencyMs.p50} ms · p95 ${r1.latencyMs.p95} ms · p99 ${r1.latencyMs.p99} ms · max ${r1.latencyMs.max} ms` : ''}</div>
+      <div class="chips">
+        <span class="chip f">${fmtN(oc.FROZEN || 0)} frozen</span><span class="chip w">${fmtN(oc.WAITING || 0)} waiting</span>
+        <span class="chip d">${fmtN(oc.DUP_REQUEST_ID || 0)} duplicate · same request id</span><span class="chip d">${fmtN(oc.DUP_ITS || 0)} duplicate · ITS already open</span>
+        <span class="chip ${oc.OTHER ? 'd' : ''}">${fmtN(oc.OTHER || 0)} other / errors</span>
+        <span class="chip">HTTP ${Object.entries(p1.statuses || {}).map(([k, v]) => `${k}: ${fmtN(v)}`).join(' · ') || '—'}</span>
+      </div>
+      ${zfm ? `<div class="how">❄ Zone frozen under load${zfm.freezeNode ? ` (via ${esc(zfm.freezeNode)})` : ''}: <b>${fmtN(zfm.answeredWhileFrozen)}</b> bookings answered while frozen, <b class="${zfm.frozenWhileFrozen ? 'badc' : 'good'}">${fmtN(zfm.frozenWhileFrozen)}</b> got tickets · ${fmtN(zfm.cancels)} held cancelled → <b class="${zfm.cancelsMoved ? 'badc' : 'good'}">${fmtN(zfm.cancelsMoved)}</b> moved while frozen · pay while frozen → HTTP ${zfm.payStatus || '—'} ${esc(zfm.payCode)}${zfm.unfreeze ? ` · unfrozen (via ${esc(zfm.unfreeze.node)}): ${fmtN(zfm.unfreeze.timersResumed)} timers resumed, <b class="frzc">${fmtN(zfm.unfreeze.movedFromLine)}</b> waiting got tickets` : ' · still frozen'}</div>` : ''}
+      ${uf ? `<div class="how">Admin unfroze under load at ${fmtN(uf.at)} requests${uf.node ? ` (via ${esc(uf.node)})` : ''} → <b class="frzc">${fmtN(uf.movedFromLine || 0)}</b> waiting requests got tickets, in order</div>` : ''}
+      <div style="margin-top:8px">${Object.entries(per).map(([k, v]) => `<div class="how" style="display:grid;grid-template-columns:140px 1fr 90px;gap:8px;align-items:center"><span>${esc(k)}</span><div class="nodebar"><div style="width:${(100 * v / maxN).toFixed(1)}%"></div></div><span class="num" style="text-align:right">${fmtN(v)}</span></div>`).join('')}</div>
+      ${r1?.errors?.length ? `<pre class="log">${esc(r1.errors.join('\n'))}</pre>` : ''}
+    </div>
+    <div class="phasebox ${s.phases.P2 ? '' : 'idle'}"><h4>P2 · ${esc(p2.title || 'The line moves')}</h4>
+      ${(p2.rounds || []).length ? `<table><thead><tr><th>Round</th><th>Node</th><th class="num">Freezes finished</th><th class="num">Paid</th><th class="num">Cancelled</th><th class="num">Moved up from line</th><th class="num">Time</th></tr></thead><tbody>${p2.rounds.map((r) => `<tr><td>${r.round}</td><td>${esc(r.node)}</td><td class="num">${fmtN(r.processed ?? 0)}</td><td class="num">${fmtN(r.booked ?? 0)}</td><td class="num">${fmtN(r.released ?? 0)}</td><td class="num"><b class="frzc">${fmtN(r.movedFromLine ?? 0)}</b></td><td class="num">${dur(r.ms)}</td></tr>`).join('')}</tbody></table>` : '<div class="how">waiting…</div>'}
+    </div>
+    <div class="phasebox ${s.checks.length ? '' : 'idle'}"><h4>P3 · Checks</h4>
+      ${s.checks.length ? `<ul class="checks">${s.checks.map((c) => `<li><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'}</span><span>${esc(c.label)}</span></li>`).join('')}</ul>` : '<div class="how">waiting…</div>'}
+      ${s.end?.zone ? `<div class="how" style="margin-top:6px">Test zone now: ${fmtN(s.end.zone.available)} free · ${fmtN(s.end.zone.frozen)} frozen · ${fmtN(s.end.zone.booked)} booked · ${fmtN(s.end.zone.waiting)} waiting · ${fmtN(s.end.zone.requests)} requests · ${fmtN(s.end.zone.duplicates)} duplicates</div>` : ''}
+    </div>
+    <div class="how" style="margin-top:8px">Run ${esc(s.id)} · started ${dt(s.startedAt)} by ${esc(s.runner)} · nodes: ${s.nodes.map(esc).join(', ')}</div>`;
+}
+function wireLoad() {
+  $('#ndAdd').onclick = async () => {
+    const r = await api('POST', '/tickets/nodes/start', { count: +$('#ndCount').value || 1 });
+    $('#ndOut').innerHTML = r.status === 200 ? `<span class="good">Starting ${r.data.started.map((x) => esc(x.instance)).join(', ')} (about 5–10 s)</span>` : errText(r.data);
+    loadLoadTab(true);
+  };
+  $('#ndRows').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-stop]'); if (!b) return;
+    b.disabled = true;
+    const r = await api('POST', `/tickets/nodes/${encodeURIComponent(b.dataset.stop)}/stop`);
+    $('#ndOut').innerHTML = r.status === 200 ? `<span class="good">Stopping ${esc(b.dataset.stop)}</span>` : errText(r.data);
+    loadLoadTab(true);
+  });
+  $('#ltStart').onclick = async () => {
+    const r = await api('POST', '/tickets/loadtest/start', { total: +$('#ltTotal').value, concurrency: +$('#ltConc').value, its: +$('#ltIts').value, sameIdPct: +$('#ltSame').value, tickets: +$('#ltTickets').value, adminFreeze: +$('#ltAdmin').value, unfreezeAt: +$('#ltUnfreeze').value, rounds: +$('#ltRounds').value, zoneFreezeAt: +$('#ltZf').value, zoneUnfreezeAt: +$('#ltZu').value });
+    if (r.status !== 200) $('#ltOut').innerHTML = errText(r.data);
+    loadLoadTab(true);
+  };
+  $('#ltCancel').onclick = async () => { await api('POST', '/tickets/loadtest/cancel'); toast('Cancelling the load test…'); };
+  $('#ltOpen').onclick = async () => { await loadZones(); if (zones.find((z) => z.id === 'load-test-zone-1')) selectZone('load-test-zone-1'); else toast('The test zone is created when a load test starts'); };
+}
+
+// live countdowns between refreshes
+setInterval(() => document.querySelectorAll('[data-exp]').forEach((td) => { if (td.dataset.exp) td.textContent = dur(Math.max(0, td.dataset.exp - Date.now())); }), 250);
+
+// ---------- actions ----------
+const ERRS = {
+  MORE_THAN_TOTAL: 'Asked for more tickets than this zone has in total.',
+  NOT_ENOUGH_FREE_TICKETS: 'Not enough free tickets right now.',
+  ITS_CANCELLED: 'This ITS id is CANCELLED in Mumin_Mast, so it cannot book.',
+  ZONE_NOT_FOUND: 'This zone does not exist any more.',
+  OTHERS_WAITING: 'Others are waiting in line, so this request cannot take more tickets (it would overtake them). Lower is always allowed.',
+  BOOKED_ONLY_LESS: 'A booked request can only be reduced (partial cancel), not increased.',
+  NOT_EDITABLE: 'This request is finished, so it cannot be changed.',
+  NOT_EXTENDABLE: 'Only a frozen request (not an admin freeze) has a freeze time to extend.',
+  FREEZE_EXPIRED: 'The freeze had already run out, so the tickets went back. Book again.',
+  NOT_FROZEN: 'This request is not frozen any more.',
+  REQUEST_NOT_FOUND: 'This request no longer exists (was the data cleared?).',
+  ZONE_FROZEN: 'The zone is frozen: only booked tickets stand. Paying and taking more tickets wait until the zone is unfrozen.',
+  ALREADY_FROZEN: 'The zone is already frozen.',
+  ZONE_NOT_FROZEN: 'The zone is not frozen.',
+};
+function errText(d) {
+  const code = String(d?.code ?? '');
+  const msg = ERRS[code] || (code.startsWith('TOTAL_BELOW_USED') ? code.replace('TOTAL_BELOW_USED: ', 'Cannot go that low: ') : '') || (Array.isArray(d?.message) ? d.message.join(', ') : d?.message) || code || 'Something went wrong';
+  return `<span class="badc"><b>Not done</b> · ${esc(msg)}</span>`;
+}
+
+function describe(r, d) {
+  const q = d?.request;
+  if (r.status === 200 && d.outcome === 'FROZEN') return `<span class="frzc"><b>FROZEN</b></span> ${q.qty} ticket(s) for <code>${esc(q.rid)}</code> (#${q.seq})${q.expiresAt ? `, pay within ${dur(q.expiresAt - q.frozenAt)}` : ''} · ${d.ms.toFixed(1)} ms`;
+  if (r.status === 202) return `<span class="warnc"><b>WAITING</b></span> place ${dash(q.position)} in line (#${q.seq})${q.duringZoneFreeze ? ' · <b>zone is frozen</b>: served in order after the unfreeze' : ''} · ${d.ms.toFixed(1)} ms`;
+  if (r.status === 404 && d?.code === 'ITS_NOT_FOUND') return '<span class="badc"><b>ITS_NOT_FOUND</b></span> this ITS id is not in Mumin_Mast';
+  if (r.status === 409 && d.outcome === 'DUPLICATE') return `<span class="badc"><b>DUPLICATE</b></span> ${esc(d.code)}: original request <code>${esc(q?.rid)}</code> is ${esc(q?.status)} · not processed again`;
+  return errText(d);
+}
+
+async function book() {
+  const rid = $('#bRid').value.trim();
+  const r = await api('POST', `/tickets/zones/${current}/book`, { muminId: +$('#bUser').value.trim(), qty: +$('#bQty').value }, rid ? { 'Idempotency-Key': rid } : {});
+  $('#bOut').innerHTML = describe(r, r.data) + (r.status === 200 || r.status === 202 ? ' <span class="how">(press Book again to see the duplicate check)</span>' : '');
+  freezeFetchedAt = 0; refresh(); loadZones();
+}
+
+async function zoneFreezeAction(kind) {
+  const r = kind === 'freeze'
+    ? await api('POST', `/tickets/zones/${current}/zone-freeze`, { reason: $('#zfReason').value, allowPay: $('#zfAllowPay').checked })
+    : await api('POST', `/tickets/zones/${current}/zone-unfreeze`);
+  const msg = r.status === 200
+    ? (kind === 'freeze'
+      ? `<span class="good"><b>Zone frozen</b></span> · ${fmtN(r.data.freeze.atFreeze.available)} free tickets blocked · ${fmtN(r.data.freeze.atFreeze.heldRequests)} held paused · new requests join the line`
+      : `<span class="good"><b>Zone unfrozen</b></span> after ${dur(r.data.freeze.durationMs)} · ${fmtN(r.data.freeze.timersResumed)} held timers resumed · <b class="frzc">${fmtN(r.data.movedFromLine)}</b> waiting requests got tickets, in order`)
+    : errText(r.data);
+  $('#zfOut').innerHTML = msg;
+  toast(r.status === 200 ? (kind === 'freeze' ? 'Zone frozen' : 'Zone unfrozen') : (ERRS[r.data?.code] || r.data?.code || 'Not done'));
+  freezeFetchedAt = 0; refresh(); loadZones();
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-zf]'); if (b) zoneFreezeAction(b.dataset.zf); });
+
+async function adminFreeze() {
+  const r = await api('POST', `/tickets/zones/${current}/freeze`, { qty: +$('#aQty').value, reason: $('#aReason').value });
+  $('#aOut').innerHTML = describe(r, r.data);
+  freezeFetchedAt = 0; refresh(); loadZones();
+}
+
+async function onRowAction(e) {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  b.disabled = true;
+  const rid = b.dataset.rid;
+  const r = b.dataset.act === 'confirm'
+    ? await api('POST', `/tickets/zones/${current}/requests/${encodeURIComponent(rid)}/confirm`)
+    : await api('POST', `/tickets/zones/${current}/requests/${encodeURIComponent(rid)}/release`, { reason: 'cancelled from the console' });
+  if (r.status === 200) {
+    const moved = r.data.movedFromLine;
+    toast(`${rid}: ${r.data.request.status}${moved ? ` · ${moved} request(s) moved up from the waiting line` : ''}`);
+  } else toast(`${rid}: ${(ERRS[r.data?.code] || r.data?.code || r.data?.message || r.status)}`);
+  freezeFetchedAt = 0; refresh(); loadZones();
+}
+
+async function burst() {
+  const b = $('#tRun'); b.disabled = true;
+  $('#tOut').innerHTML = '<span class="how">sending…</span>';
+  const r = await api('POST', `/tickets/zones/${current}/simulate`, { its: +$('#tReq').value, perIts: +$('#tUsers').value, sameIdPct: +$('#tDup').value, maxQty: +$('#tMax').value });
+  b.disabled = false;
+  if (r.status !== 200) { $('#tOut').innerHTML = `<span class="badc">${esc(r.data?.message || r.status)}</span>`; return; }
+  const d = r.data, x = d.result;
+  $('#tOut').innerHTML = `<div class="kv">
+    <div>ITS ids</div><div><b>${fmtN(d.its)}</b> × ${d.perIts} requests at the same instant</div>
+    <div>Sent</div><div><b>${fmtN(d.sent)}</b> in ${dur(d.ms)} (${fmtN(d.perSecond)}/s · p50 ${d.latencyMs.p50} ms · p95 ${d.latencyMs.p95} ms)</div>
+    <div>Frozen</div><div class="frzc"><b>${fmtN(x.FROZEN)}</b></div>
+    <div>Waiting</div><div class="warnc"><b>${fmtN(x.WAITING)}</b></div>
+    <div>Duplicate · same request id</div><div class="badc">${fmtN(x.DUPLICATE_REQUEST_ID)}</div>
+    <div>Duplicate · ITS already open</div><div class="badc">${fmtN(x.DUPLICATE_ITS)}</div>
+    <div>Per ITS id</div><div>${d.perItsCheck.moreThanOne === 0 ? '<b class="good">✓</b>' : '<b class="badc">✗</b>'} ${fmtN(d.perItsCheck.exactlyOne)} exactly one accepted · ${fmtN(d.perItsCheck.none)} none (already open) · <b class="${d.perItsCheck.moreThanOne ? 'badc' : 'good'}">${fmtN(d.perItsCheck.moreThanOne)} more than one</b></div>
+    ${x.ERR ? `<div>Errors</div><div class="badc">${fmtN(x.ERR)}</div>` : ''}
+    <div>Now</div><div>${fmtN(d.after.available)} free · ${fmtN(d.after.frozen)} frozen · ${fmtN(d.after.waiting)} waiting</div></div>`;
+  freezeFetchedAt = 0; refresh(); loadZones();
+}
+
+async function parallel() {
+  const its = $('#pIts').value.trim(), n = Math.max(2, Math.min(200, +$('#pN').value || 20)), mode = $('#pMode').value;
+  if (!/^\d+$/.test(its)) { $('#pOut').innerHTML = '<span class="badc">enter an ITS id</span>'; return; }
+  const b = $('#pRun'); b.disabled = true;
+  const base = newRid();
+  const ids = Array.from({ length: n }, (_, i) => mode === 'same' ? base : mode === 'mix' && i % 2 ? base : `${base}-${i}`);
+  const t0 = performance.now();
+  const answers = await Promise.all(ids.map((rid) => fetch(`/tickets/zones/${current}/book`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': rid }, body: JSON.stringify({ muminId: +its, qty: +$('#bQty').value || 1 }),
+  }).then(async (r) => ({ status: r.status, inst: r.headers.get('X-Instance'), d: await r.json().catch(() => ({})) })).catch(() => ({ status: 0, d: {} }))));
+  const ms = performance.now() - t0;
+  b.disabled = false;
+  const ok = answers.filter((a) => a.status === 200 || a.status === 202);
+  const dupId = answers.filter((a) => a.d.code === 'REQUEST_ID_ALREADY_USED').length;
+  const dupIts = answers.filter((a) => a.d.code === 'ITS_HAS_OPEN_REQUEST').length;
+  const other = answers.length - ok.length - dupId - dupIts;
+  const winner = ok[0]?.d.request || answers.find((a) => a.d.request)?.d.request;
+  $('#pOut').innerHTML = `<div class="banner ${ok.length <= 1 && !other ? 'pass' : 'fail'}">${n} parallel requests · ${ok.length} accepted · ${dupId + dupIts} duplicate${other ? ` · ${other} other` : ''} · ${ms.toFixed(0)} ms</div>
+    <div class="kv">
+      <div>Accepted</div><div>${ok.length ? `${st(winner.status)} <code>${esc(winner.rid)}</code> (#${winner.seq})` : 'none: this ITS id already had an open request'}</div>
+      <div>Same request id</div><div class="badc">${dupId} blocked</div>
+      <div>ITS already open</div><div class="badc">${dupIts} blocked</div>
+      ${other ? `<div>Other</div><div class="badc">${[...new Set(answers.filter((a) => !(a.status === 200 || a.status === 202) && !['REQUEST_ID_ALREADY_USED', 'ITS_HAS_OPEN_REQUEST'].includes(a.d.code)).map((a) => a.status + ' ' + (a.d.code || a.d.message)))].join(', ')}</div>` : ''}
+    </div>`;
+  $('#iIts').value = its; freezeFetchedAt = 0; refresh(); loadZones();
+}
+
+async function itsLookup() {
+  const v = $('#iIts').value.trim();
+  if (!/^\d+$/.test(v)) return;
+  const r = await api('GET', `/tickets/its/${v}`);
+  if (r.status !== 200) { $('#iOut').innerHTML = `<div class="badc">${esc(r.data?.code || r.status)}</div>`; return; }
+  const d = r.data, zn = (id) => { const z = zones.find((x) => x.id === id); return z ? `${esc(z.city)} · ${esc(z.name)}` : esc(id); };
+  $('#iOut').innerHTML = `<div class="kv" style="margin-bottom:10px">
+      <div>ITS id</div><div><b>${d.muminId}</b> · ${esc(d.name)} · ${esc(d.gender)} · ${esc(d.jamaat)}${d.cancelled ? ' · <span class="badc">CANCELLED in Mumin_Mast (cannot book)</span>' : ''}</div>
+      <div>Open requests</div><div>${d.perZone.filter((z) => z.open).map((z) => `${zn(z.zone)}: <code>${esc(z.open)}</code>`).join(' · ') || 'none'}</div>
+      <div>Duplicates blocked</div><div>${d.perZone.filter((z) => z.duplicatesBlocked).map((z) => `${zn(z.zone)}: <b class="badc">${z.duplicatesBlocked}</b>`).join(' · ') || '0'}</div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th class="num">Req #</th><th>Zone</th><th>Requested at</th><th>Request id</th><th class="num">Tix</th><th>Status</th><th>Frozen at</th><th>How</th><th>Booked / ended</th></tr></thead><tbody>${d.requests.map((x) => `<tr>
+      <td class="num">${x.seq}</td><td>${zn(x.zone)}</td><td class="t">${tm(x.requestedAt)}</td><td class="rid">${ridLink(x.rid)}</td><td class="num">${x.qty}</td>
+      <td>${st(x.status)}</td><td class="t">${tm(x.frozenAt)}</td><td>${how(x)}</td><td class="t">${tm(x.bookedAt || x.endedAt)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">No booking requests.</td></tr>'}</tbody></table></div>`;
+}
+
+async function settle() {
+  const b = $('#sRun'); b.disabled = true;
+  const r = await api('POST', `/tickets/zones/${current}/settle`, { payPct: +$('#sPay').value });
+  b.disabled = false;
+  if (r.status !== 200) { $('#tOut').innerHTML = `<span class="badc">${esc(r.data?.message || r.status)}</span>`; return; }
+  const d = r.data;
+  $('#tOut').innerHTML = `<div class="kv">
+    <div>Freezes finished</div><div><b>${fmtN(d.processed)}</b> (oldest first)</div>
+    <div>Paid → booked</div><div class="good">${fmtN(d.booked)}</div>
+    <div>Cancelled → released</div><div>${fmtN(d.released)}${d.expired ? ` · ${fmtN(d.expired)} already expired` : ''}</div>
+    <div>Moved up from line</div><div class="frzc"><b>${fmtN(d.movedFromLine)}</b> (now frozen, in request order)</div>
+    <div>Now</div><div>${fmtN(d.after.available)} free · ${fmtN(d.after.frozen)} frozen · ${fmtN(d.after.booked)} booked · ${fmtN(d.after.waiting)} waiting</div></div>`;
+  freezeFetchedAt = 0; refresh(); loadZones();
+}
+
+async function verify() {
+  $('#vOut').innerHTML = '<div class="empty">Checking…</div>';
+  const r = await api('GET', `/tickets/zones/${current}/verify`);
+  if (r.status !== 200) { $('#vOut').innerHTML = `<div class="badc">${esc(r.data?.message || r.status)}</div>`; return; }
+  const d = r.data;
+  $('#vMeta').textContent = `${fmtN(d.requests)} requests scanned at ${tm(Date.now())}`;
+  $('#vOut').innerHTML = `<div class="banner ${d.passed ? 'pass' : 'fail'}">${d.passed ? 'All checks passed' : 'Some checks failed'}</div>
+    <ul class="checks">${d.checks.map((c) => `<li><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'}</span><span>${esc(c.name)}</span><span class="d">${esc(c.detail)}</span></li>`).join('')}</ul>`;
+}
+
+let settingsDirty = false;
+function editMsg(r) {
+  if (r.status === 200) {
+    const d = r.data;
+    return `<span class="good"><b>Saved</b></span> · ${esc(d.changes || 'nothing changed')}${d.movedFromLine ? ` · <b class="frzc">${d.movedFromLine}</b> waiting request(s) got tickets, in order` : ''}`;
+  }
+  return errText(r.data);
+}
+async function saveSettings() {
+  const r = await api('PATCH', `/tickets/zones/${current}`, { city: $('#eCity').value, name: $('#eName').value, show: $('#eShow').value, total: +$('#eTotal').value, holdSeconds: +$('#eHold').value });
+  $('#eOut').innerHTML = editMsg(r);
+  settingsDirty = false;
+  freezeFetchedAt = 0; await loadZones(); refresh();
+}
+async function changeTickets(sign) {
+  const n = Math.floor(+$('#qN').value);
+  if (!(n > 0)) { $('#qOut').innerHTML = '<span class="badc">Enter how many tickets</span>'; return; }
+  const total = report.zone.total + sign * n;
+  if (total < 1) { $('#qOut').innerHTML = '<span class="badc">A zone needs at least 1 ticket</span>'; return; }
+  const r = await api('PATCH', `/tickets/zones/${current}`, { total });
+  $('#qOut').innerHTML = editMsg(r);
+  freezeFetchedAt = 0; await loadZones(); refresh();
+}
+
+async function resetZone() {
+  if (!confirm(`Reset ${current}? All its requests, freezes and report rows are removed.`)) return;
+  const r = await api('POST', `/tickets/zones/${current}/reset`);
+  $('#zOut').innerHTML = r.status === 200 ? `<span class="good">Reset · ${fmtN(r.data.removedRequests)} requests removed</span>` : `<span class="badc">${esc(r.data?.message)}</span>`;
+  freezeFetchedAt = 0; refresh(); loadZones();
+}
+
+// Clear ALL ticket data (every zone, every tab). Two clicks: arm, then confirm within 5 s.
+let clearArmed = 0;
+$('#clearAll').onclick = async () => {
+  const b = $('#clearAll');
+  if (Date.now() - clearArmed > 5000) {
+    clearArmed = Date.now();
+    b.textContent = 'Click again to clear everything';
+    b.classList.remove('secondary');
+    setTimeout(() => { if (Date.now() - clearArmed >= 5000) { b.textContent = 'Clear all data'; b.classList.add('secondary'); } }, 5100);
+    return;
+  }
+  clearArmed = 0; b.disabled = true; b.textContent = 'Clearing…';
+  const r = await api('POST', '/tickets/clear-all');
+  b.disabled = false; b.textContent = 'Clear all data'; b.classList.add('secondary');
+  if (r.status !== 200) { toast('Clear failed: ' + (r.data?.message || r.status)); return; }
+  // rebuild every tab from scratch so nothing old stays on screen
+  report = null; freezeData = null; freezeFetchedAt = 0; byRid = new Map();
+  $('#dlg').classList.add('hidden'); $('#nzOut').innerHTML = '';
+  await loadZones(); selectZone(current && zones.find((z) => z.id === current) ? current : zones[0]?.id ?? null);
+  toast(`All ticket data cleared · ${fmtN(r.data.removedRequests)} requests removed · ${r.data.zones} zones reset to full tickets`);
+};
+
+async function deleteZone() {
+  if (!confirm(`Delete zone ${current}?`)) return;
+  await api('DELETE', `/tickets/zones/${current}`);
+  current = null; await loadZones(); selectZone(zones[0]?.id ?? null);
+}
+
+$('#nzSave').onclick = async () => {
+  const r = await api('POST', '/tickets/zones', { city: $('#nzCity').value, name: $('#nzName').value, show: $('#nzShow').value, total: +$('#nzTotal').value, holdSeconds: +$('#nzHold').value });
+  $('#nzOut').innerHTML = r.status === 200 ? `<span class="good">${esc(r.data.result.toLowerCase())}: ${esc(r.data.id)}</span>` : `<span class="badc">${esc(r.data?.code || r.data?.message)}</span>`;
+  if (r.status === 200) { await loadZones(); selectZone(r.data.id); }
+};
+
+$('#themeBtn').onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('tb.theme', document.documentElement.dataset.theme); } catch {}
+};
+try { const t = localStorage.getItem('tb.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+
+setInterval(() => { if ($('#auto').checked && !document.hidden) { loadZones(); refresh(); } }, 1500);
+setInterval(() => { if (view === 'load' && !document.hidden && $('#ltOut')) loadLoadTab(); }, 1000);
+$('#main').addEventListener('click', onRowAction);
+loadZones().then(() => selectZone(zones.find((z) => z.id === current) ? current : zones[0]?.id ?? null));
+</script>
+</body>
+</html>

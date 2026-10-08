@@ -6,6 +6,7 @@ import { RedisModule } from './redis/redis.module';
 import { MuminModule } from './mumin/mumin.module';
 import { SnapshotModule } from './snapshot/snapshot.module';
 import { LoadTestModule } from './loadtest/loadtest.module';
+import { TicketsModule } from './tickets/tickets.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { LoadTestModule } from './loadtest/loadtest.module';
     MuminModule,
     SnapshotModule,
     LoadTestModule,
+    TicketsModule,
   ],
 })
 export class AppModule {}
